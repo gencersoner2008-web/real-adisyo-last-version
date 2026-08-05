@@ -37,7 +37,7 @@ export default function OrderPage() {
     setTable(tl.data.find((x) => x.id === tableId) || null);
   };
 
-  useEffect(() => { load(); }, [tableId]); // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => { load(); }, [tableId]);
   // Polling for QR-driven updates
   useEffect(() => {
     const t = setInterval(async () => {
