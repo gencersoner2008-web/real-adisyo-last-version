@@ -74,18 +74,25 @@ export default function TablesPage() {
   return (
     <div className="space-y-8">
       {/* Summary strip */}
-      <section className="grid sm:grid-cols-2 gap-5">
+      <section className="grid grid-cols-1 md:grid-cols-3 gap-5">
         <div data-testid="summary-daily" className="bg-white rounded-2xl p-6 border border-[#E6DDD1] card-shadow">
           <p className="text-xs uppercase tracking-[0.24em] text-[#6B5D54]">Bugün</p>
           <p className="font-display text-3xl sm:text-4xl font-bold mt-2 text-[#2C1F16]">
             {formatTL(summary?.daily_total)}
           </p>
-          <p className="text-sm text-[#6B5D54] mt-1">{summary?.daily_order_count ?? 0} adisyon kapatıldı</p>
+          <p className="text-sm text-[#6B5D54] mt-1">{summary?.daily_order_count ?? 0} adisyon</p>
         </div>
         <div data-testid="summary-monthly" className="bg-[#2C1F16] rounded-2xl p-6 text-white card-shadow">
           <p className="text-xs uppercase tracking-[0.24em] text-white/60">Bu Ay</p>
           <p className="font-display text-3xl sm:text-4xl font-bold mt-2">{formatTL(summary?.monthly_total)}</p>
-          <p className="text-sm text-white/70 mt-1">{summary?.monthly_order_count ?? 0} adisyon kapatıldı</p>
+          <p className="text-sm text-white/70 mt-1">{summary?.monthly_order_count ?? 0} adisyon</p>
+        </div>
+        <div data-testid="summary-yearly" className="bg-white rounded-2xl p-6 border border-[#E6DDD1] card-shadow">
+          <p className="text-xs uppercase tracking-[0.24em] text-[#6B5D54]">Bu Yıl</p>
+          <p className="font-display text-3xl sm:text-4xl font-bold mt-2 text-[#2C1F16]">
+            {formatTL(summary?.yearly_total)}
+          </p>
+          <p className="text-sm text-[#6B5D54] mt-1">{summary?.yearly_order_count ?? 0} adisyon</p>
         </div>
       </section>
 

@@ -697,11 +697,27 @@ def _local_month_bounds(ref: datetime) -> (str, str):
     return start.isoformat(), end.isoformat()
 
 
+def _local_year_bounds(ref: datetime) -> (str, str):
+    start = ref.replace(month=1, day=1, hour=0, minute=0, second=0, microsecond=0)
+    end = start.replace(year=start.year + 1)
+    return start.isoformat(), end.isoformat()
+
+
+def _period_bounds(period: str):
+    now = datetime.now(timezone.utc)
+    if period == "yearly":
+        return _local_year_bounds(now)
+    if period == "monthly":
+        return _local_month_bounds(now)
+    return _local_day_bounds(now)
+
+
 @api_router.get("/reports/summary")
 async def reports_summary(_: bool = Depends(require_auth)):
     now = datetime.now(timezone.utc)
     d_start, d_end = _local_day_bounds(now)
     m_start, m_end = _local_month_bounds(now)
+    y_start, y_end = _local_year_bounds(now)
 
     async def sum_range(start, end):
         cursor = db.orders.find({
@@ -717,21 +733,20 @@ async def reports_summary(_: bool = Depends(require_auth)):
 
     daily_total, daily_count = await sum_range(d_start, d_end)
     monthly_total, monthly_count = await sum_range(m_start, m_end)
+    yearly_total, yearly_count = await sum_range(y_start, y_end)
     return {
         "daily_total": daily_total,
         "daily_order_count": daily_count,
         "monthly_total": monthly_total,
         "monthly_order_count": monthly_count,
+        "yearly_total": yearly_total,
+        "yearly_order_count": yearly_count,
     }
 
 
 @api_router.get("/reports/products")
 async def reports_products(period: str = "daily", _: bool = Depends(require_auth)):
-    now = datetime.now(timezone.utc)
-    if period == "monthly":
-        start, end = _local_month_bounds(now)
-    else:
-        start, end = _local_day_bounds(now)
+    start, end = _period_bounds(period)
 
     cursor = db.orders.find({
         "status": "paid",
@@ -750,6 +765,47 @@ async def reports_products(period: str = "daily", _: bool = Depends(require_auth
         r["revenue"] = round(r["revenue"], 2)
     result.sort(key=lambda x: -x["qty"])
     return result
+
+
+@api_router.get("/reports/orders")
+async def reports_orders(period: str = "daily", _: bool = Depends(require_auth)):
+    start, end = _period_bounds(period)
+    docs = await db.orders.find({
+        "status": "paid",
+        "paid_at": {"$gte": start, "$lt": end},
+    }, {"_id": 0}).sort("paid_at", -1).to_list(2000)
+    result = []
+    for o in docs:
+        items_count = sum(i.get("qty", 0) for i in o.get("items", []))
+        result.append({
+            "id": o["id"],
+            "table_name": o.get("table_name", ""),
+            "paid_at": o.get("paid_at"),
+            "total": o.get("total", 0.0),
+            "subtotal": o.get("subtotal", 0.0),
+            "discount_percent": o.get("discount_percent", 0),
+            "item_count": items_count,
+            "items": o.get("items", []),
+        })
+    return result
+
+
+@api_router.delete("/reports/orders/{order_id}")
+async def delete_paid_order(order_id: str, _: bool = Depends(require_auth)):
+    res = await db.orders.delete_one({"id": order_id, "status": "paid"})
+    if res.deleted_count == 0:
+        raise HTTPException(404, "Sipariş bulunamadı")
+    return {"ok": True}
+
+
+@api_router.delete("/reports/orders")
+async def delete_paid_orders_period(period: str = "daily", _: bool = Depends(require_auth)):
+    start, end = _period_bounds(period)
+    res = await db.orders.delete_many({
+        "status": "paid",
+        "paid_at": {"$gte": start, "$lt": end},
+    })
+    return {"deleted": res.deleted_count}
 
 
 # --------- Seed ---------
