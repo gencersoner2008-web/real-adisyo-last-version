@@ -1,0 +1,30 @@
+{
+  "summary": "First-finish smoke test of REAL COFFEE ADİSYON POS. Backend end-to-end (login, tables, products, order add hot+cold, public/QR add, pay, summary, reports) verified via curl. Frontend UI verified via Playwright: login (correct & wrong pw), tables page (8 seeded tables + summary), order flow (hot with size prompt, cold direct-add, cart total, increment updates total, pay success toast + order becomes null in backend confirming paid), reports page shows correct daily/monthly totals and sold products, QR /qr/:tableId loads without auth and shows menu.",
+  "tested_scope": ["frontend", "backend", "auth", "integration"],
+  "passed": [
+    "POST /api/auth/login with 1234 returns token; wrong pw returns 401",
+    "GET /api/tables returns 8 seeded Masa 1..8; GET /api/products returns 14 products across hot/cold/other",
+    "POST /api/orders/table/{tid}/add hot+size=tall unit_price=55, cold qty=2 aggregates total correctly",
+    "POST /api/public/orders/table/{tid}/add works without auth and increases order total",
+    "POST /api/orders/table/{tid}/pay marks order paid; subsequent GET returns null",
+    "GET /api/reports/summary and /api/reports/products?period=daily|monthly return correct aggregates",
+    "Login UI: wrong password shows 'Şifre hatalı' toast; correct login navigates to /",
+    "Tables page shows 8 table cards and daily/monthly summary labels",
+    "Order page hot product triggers size modal (tall/grande/venti); grande add works",
+    "Cold product adds directly without size prompt",
+    "cart-total updates on add and on cart-inc-<itemId>",
+    "Pay button triggers 'Ödeme alındı, fiş yazdırılıyor' toast; backend order becomes null (paid)",
+    "Reports page: report-daily-total & report-monthly-total show correct ₺ values; tab-daily and tab-monthly render sold-products table (Espresso Grande, Ice Latte Standart, Cheesecake, Espresso Tall)",
+    "QR /qr/:tableId loads unauthenticated and renders Masa name + full menu with hot/cold/other tabs"
+  ],
+  "failed": [],
+  "action_items": [],
+  "success_rate": {"backend": "100%", "frontend": "100%"},
+  "retest_needed": false,
+  "full_testing_deferred": true,
+  "notes": [
+    "receipt-print DOM element is rendered only while Receipt component is mounted; the afterprint handler unmounts it. Verified pay flow via success toast + backend order=null instead of DOM presence (per instructions).",
+    "Product management (add/edit/delete) and Table management (add/delete/delete-with-open-order error) UIs were NOT exercised in this smoke pass (deferred to full testing). Backend CRUD endpoints exist and were not smoke-tested individually.",
+    "Minor a11y console warning: 'Missing Description or aria-describedby for DialogContent' (size picker Radix dialog) — non-blocking."
+  ]
+}

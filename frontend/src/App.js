@@ -1,54 +1,50 @@
-import { useEffect } from "react";
 import "@/App.css";
-import { BrowserRouter, Routes, Route } from "react-router-dom";
-import axios from "axios";
-import { HOME } from "@/constants/testIds";
+import { BrowserRouter, Routes, Route, Navigate } from "react-router-dom";
+import { AuthProvider, useAuth } from "@/context/AuthContext";
+import { Toaster } from "@/components/ui/sonner";
+import LoginPage from "@/pages/LoginPage";
+import AppShell from "@/pages/AppShell";
+import TablesPage from "@/pages/TablesPage";
+import OrderPage from "@/pages/OrderPage";
+import ProductsPage from "@/pages/ProductsPage";
+import ManageTablesPage from "@/pages/ManageTablesPage";
+import ReportsPage from "@/pages/ReportsPage";
+import QrOrderPage from "@/pages/QrOrderPage";
 
-const BACKEND_URL = process.env.REACT_APP_BACKEND_URL;
-const API = `${BACKEND_URL}/api`;
-
-const Home = () => {
-  const helloWorldApi = async () => {
-    try {
-      const response = await axios.get(`${API}/`);
-      console.log(response.data.message);
-    } catch (e) {
-      console.error(e, `errored out requesting / api`);
-    }
-  };
-
-  useEffect(() => {
-    helloWorldApi();
-  }, []);
-
-  return (
-    <div>
-      <header className="App-header">
-        <a
-          data-testid={HOME.emergentLink}
-          className="App-link"
-          href="https://emergent.sh"
-          target="_blank"
-          rel="noopener noreferrer"
-        >
-          <img src="https://avatars.githubusercontent.com/in/1201222?s=120&u=2686cf91179bbafbc7a71bfbc43004cf9ae1acea&v=4" />
-        </a>
-        <p className="mt-5">Building something incredible ~!</p>
-      </header>
-    </div>
-  );
-};
+function Protected({ children }) {
+  const { isAuthed, ready } = useAuth();
+  if (!ready) return null;
+  if (!isAuthed) return <Navigate to="/login" replace />;
+  return children;
+}
 
 function App() {
   return (
     <div className="App">
-      <BrowserRouter>
-        <Routes>
-          <Route path="/" element={<Home />}>
-            <Route index element={<Home />} />
-          </Route>
-        </Routes>
-      </BrowserRouter>
+      <AuthProvider>
+        <BrowserRouter>
+          <Routes>
+            <Route path="/login" element={<LoginPage />} />
+            <Route path="/qr/:tableId" element={<QrOrderPage />} />
+            <Route
+              path="/"
+              element={
+                <Protected>
+                  <AppShell />
+                </Protected>
+              }
+            >
+              <Route index element={<TablesPage />} />
+              <Route path="masalar/:tableId" element={<OrderPage />} />
+              <Route path="urunler" element={<ProductsPage />} />
+              <Route path="masa-yonetim" element={<ManageTablesPage />} />
+              <Route path="raporlar" element={<ReportsPage />} />
+            </Route>
+            <Route path="*" element={<Navigate to="/" replace />} />
+          </Routes>
+        </BrowserRouter>
+        <Toaster richColors position="top-right" />
+      </AuthProvider>
     </div>
   );
 }

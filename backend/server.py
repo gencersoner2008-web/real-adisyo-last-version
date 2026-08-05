@@ -1,4 +1,4 @@
-from fastapi import FastAPI, APIRouter
+from fastapi import FastAPI, APIRouter, HTTPException, Depends, Header
 from dotenv import load_dotenv
 from starlette.middleware.cors import CORSMiddleware
 from motor.motor_asyncio import AsyncIOMotorClient
@@ -6,83 +6,486 @@ import os
 import logging
 from pathlib import Path
 from pydantic import BaseModel, Field, ConfigDict
-from typing import List
+from typing import List, Optional, Literal
 import uuid
-from datetime import datetime, timezone
-
+from datetime import datetime, timezone, timedelta
 
 ROOT_DIR = Path(__file__).parent
-load_dotenv(ROOT_DIR / '.env')
+load_dotenv(ROOT_DIR / ".env")
 
-# MongoDB connection
-mongo_url = os.environ['MONGO_URL']
+mongo_url = os.environ["MONGO_URL"]
 client = AsyncIOMotorClient(mongo_url)
-db = client[os.environ['DB_NAME']]
+db = client[os.environ["DB_NAME"]]
 
-# Create the main app without a prefix
-app = FastAPI()
-
-# Create a router with the /api prefix
+app = FastAPI(title="REAL COFFEE ADİSYON")
 api_router = APIRouter(prefix="/api")
 
+# --------- Constants ---------
+APP_PASSWORD = os.environ.get("APP_PASSWORD", "1234")
+SESSION_TOKEN = "real-coffee-session-token"  # simple, single-user
+Category = Literal["hot", "cold", "other"]
 
-# Define Models
-class StatusCheck(BaseModel):
-    model_config = ConfigDict(extra="ignore")  # Ignore MongoDB's _id field
-    
+
+# --------- Models ---------
+class LoginRequest(BaseModel):
+    password: str
+
+
+class ProductCreate(BaseModel):
+    model_config = ConfigDict(extra="ignore")
+    name: str
+    category: Category
+    price_tall: Optional[float] = None
+    price_grande: Optional[float] = None
+    price_venti: Optional[float] = None
+    price: Optional[float] = None  # for cold & other
+
+
+class Product(ProductCreate):
     id: str = Field(default_factory=lambda: str(uuid.uuid4()))
-    client_name: str
-    timestamp: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+    created_at: str = Field(default_factory=lambda: datetime.now(timezone.utc).isoformat())
 
-class StatusCheckCreate(BaseModel):
-    client_name: str
 
-# Add your routes to the router instead of directly to app
-@api_router.get("/")
-async def root():
-    return {"message": "Hello World"}
+class TableCreate(BaseModel):
+    name: str
 
-@api_router.post("/status", response_model=StatusCheck)
-async def create_status_check(input: StatusCheckCreate):
-    status_dict = input.model_dump()
-    status_obj = StatusCheck(**status_dict)
-    
-    # Convert to dict and serialize datetime to ISO string for MongoDB
-    doc = status_obj.model_dump()
-    doc['timestamp'] = doc['timestamp'].isoformat()
-    
-    _ = await db.status_checks.insert_one(doc)
-    return status_obj
 
-@api_router.get("/status", response_model=List[StatusCheck])
-async def get_status_checks():
-    # Exclude MongoDB's _id field from the query results
-    status_checks = await db.status_checks.find({}, {"_id": 0}).to_list(1000)
-    
-    # Convert ISO string timestamps back to datetime objects
-    for check in status_checks:
-        if isinstance(check['timestamp'], str):
-            check['timestamp'] = datetime.fromisoformat(check['timestamp'])
-    
-    return status_checks
+class Table(BaseModel):
+    id: str = Field(default_factory=lambda: str(uuid.uuid4()))
+    name: str
+    created_at: str = Field(default_factory=lambda: datetime.now(timezone.utc).isoformat())
 
-# Include the router in the main app
+
+class OrderItem(BaseModel):
+    id: str = Field(default_factory=lambda: str(uuid.uuid4()))
+    product_id: str
+    name: str
+    size: Optional[str] = None  # tall/grande/venti/standard
+    unit_price: float
+    qty: int = 1
+
+    @property
+    def total(self) -> float:
+        return round(self.unit_price * self.qty, 2)
+
+
+class AddItemRequest(BaseModel):
+    product_id: str
+    size: Optional[str] = None  # required for hot
+    qty: int = 1
+
+
+class Order(BaseModel):
+    id: str = Field(default_factory=lambda: str(uuid.uuid4()))
+    table_id: str
+    table_name: str
+    items: List[OrderItem] = Field(default_factory=list)
+    status: Literal["open", "paid"] = "open"
+    created_at: str = Field(default_factory=lambda: datetime.now(timezone.utc).isoformat())
+    paid_at: Optional[str] = None
+    total: float = 0.0
+    source: Literal["staff", "qr"] = "staff"
+
+
+# --------- Auth ---------
+def require_auth(authorization: Optional[str] = Header(None)):
+    if not authorization or authorization.replace("Bearer ", "") != SESSION_TOKEN:
+        raise HTTPException(status_code=401, detail="Yetkisiz")
+    return True
+
+
+# --------- Utility ---------
+def compute_total(items: List[dict]) -> float:
+    return round(sum(i["unit_price"] * i["qty"] for i in items), 2)
+
+
+async def get_open_order(table_id: str) -> Optional[dict]:
+    return await db.orders.find_one({"table_id": table_id, "status": "open"}, {"_id": 0})
+
+
+# --------- Auth Route ---------
+@api_router.post("/auth/login")
+async def login(req: LoginRequest):
+    if req.password != APP_PASSWORD:
+        raise HTTPException(status_code=401, detail="Şifre hatalı")
+    return {"token": SESSION_TOKEN}
+
+
+@api_router.get("/auth/verify")
+async def verify(_: bool = Depends(require_auth)):
+    return {"ok": True}
+
+
+# --------- Products ---------
+@api_router.get("/products", response_model=List[Product])
+async def list_products(_: bool = Depends(require_auth)):
+    docs = await db.products.find({}, {"_id": 0}).sort("created_at", 1).to_list(1000)
+    return docs
+
+
+@api_router.post("/products", response_model=Product)
+async def create_product(p: ProductCreate, _: bool = Depends(require_auth)):
+    if p.category == "hot":
+        if p.price_tall is None or p.price_grande is None or p.price_venti is None:
+            raise HTTPException(400, "Sıcak içecekler için tall/grande/venti fiyatları zorunlu")
+    else:
+        if p.price is None:
+            raise HTTPException(400, "Fiyat zorunlu")
+    prod = Product(**p.model_dump())
+    await db.products.insert_one(prod.model_dump())
+    return prod
+
+
+@api_router.put("/products/{product_id}", response_model=Product)
+async def update_product(product_id: str, p: ProductCreate, _: bool = Depends(require_auth)):
+    existing = await db.products.find_one({"id": product_id}, {"_id": 0})
+    if not existing:
+        raise HTTPException(404, "Ürün bulunamadı")
+    update = p.model_dump()
+    await db.products.update_one({"id": product_id}, {"$set": update})
+    doc = await db.products.find_one({"id": product_id}, {"_id": 0})
+    return doc
+
+
+@api_router.delete("/products/{product_id}")
+async def delete_product(product_id: str, _: bool = Depends(require_auth)):
+    res = await db.products.delete_one({"id": product_id})
+    if res.deleted_count == 0:
+        raise HTTPException(404, "Ürün bulunamadı")
+    return {"ok": True}
+
+
+# --------- Tables ---------
+@api_router.get("/tables")
+async def list_tables(_: bool = Depends(require_auth)):
+    tables = await db.tables.find({}, {"_id": 0}).sort("created_at", 1).to_list(500)
+    result = []
+    for t in tables:
+        order = await get_open_order(t["id"])
+        result.append({
+            **t,
+            "has_open_order": bool(order),
+            "open_total": order["total"] if order else 0.0,
+            "open_item_count": sum(i["qty"] for i in order["items"]) if order else 0,
+        })
+    return result
+
+
+@api_router.post("/tables", response_model=Table)
+async def create_table(t: TableCreate, _: bool = Depends(require_auth)):
+    tbl = Table(name=t.name)
+    await db.tables.insert_one(tbl.model_dump())
+    return tbl
+
+
+@api_router.delete("/tables/{table_id}")
+async def delete_table(table_id: str, _: bool = Depends(require_auth)):
+    open_order = await get_open_order(table_id)
+    if open_order:
+        raise HTTPException(400, "Bu masada açık adisyon var, önce ödemeyi kapatın")
+    res = await db.tables.delete_one({"id": table_id})
+    if res.deleted_count == 0:
+        raise HTTPException(404, "Masa bulunamadı")
+    return {"ok": True}
+
+
+# --------- Orders / Adisyon ---------
+@api_router.get("/orders/table/{table_id}")
+async def get_table_order(table_id: str, _: bool = Depends(require_auth)):
+    order = await get_open_order(table_id)
+    return order  # may be None
+
+
+@api_router.post("/orders/table/{table_id}/add")
+async def add_item(table_id: str, req: AddItemRequest, _: bool = Depends(require_auth)):
+    table = await db.tables.find_one({"id": table_id}, {"_id": 0})
+    if not table:
+        raise HTTPException(404, "Masa bulunamadı")
+    product = await db.products.find_one({"id": req.product_id}, {"_id": 0})
+    if not product:
+        raise HTTPException(404, "Ürün bulunamadı")
+
+    # Determine price + size label
+    size_label = None
+    if product["category"] == "hot":
+        if req.size not in ("tall", "grande", "venti"):
+            raise HTTPException(400, "Sıcak içecek için boy seçiniz (tall/grande/venti)")
+        unit_price = product[f"price_{req.size}"]
+        size_label = req.size
+    else:
+        unit_price = product["price"]
+        size_label = "standart" if product["category"] == "cold" else None
+
+    order = await get_open_order(table_id)
+    if not order:
+        order_obj = Order(table_id=table_id, table_name=table["name"])
+        order = order_obj.model_dump()
+        await db.orders.insert_one(order)
+
+    # Merge with existing same product+size
+    merged = False
+    for it in order["items"]:
+        if it["product_id"] == req.product_id and it.get("size") == size_label:
+            it["qty"] += req.qty
+            merged = True
+            break
+    if not merged:
+        item = OrderItem(
+            product_id=req.product_id,
+            name=product["name"],
+            size=size_label,
+            unit_price=unit_price,
+            qty=req.qty,
+        )
+        order["items"].append(item.model_dump())
+
+    order["total"] = compute_total(order["items"])
+    await db.orders.update_one({"id": order["id"]}, {"$set": {"items": order["items"], "total": order["total"]}})
+    order = await db.orders.find_one({"id": order["id"]}, {"_id": 0})
+    return order
+
+
+@api_router.post("/orders/table/{table_id}/remove/{item_id}")
+async def remove_item(table_id: str, item_id: str, _: bool = Depends(require_auth)):
+    order = await get_open_order(table_id)
+    if not order:
+        raise HTTPException(404, "Açık adisyon yok")
+    new_items = []
+    changed = False
+    for it in order["items"]:
+        if it["id"] == item_id:
+            if it["qty"] > 1:
+                it["qty"] -= 1
+                new_items.append(it)
+            # else drop
+            changed = True
+        else:
+            new_items.append(it)
+    if not changed:
+        raise HTTPException(404, "Ürün bulunamadı")
+    if not new_items:
+        await db.orders.delete_one({"id": order["id"]})
+        return None
+    total = compute_total(new_items)
+    await db.orders.update_one({"id": order["id"]}, {"$set": {"items": new_items, "total": total}})
+    order = await db.orders.find_one({"id": order["id"]}, {"_id": 0})
+    return order
+
+
+@api_router.post("/orders/table/{table_id}/delete-item/{item_id}")
+async def delete_item(table_id: str, item_id: str, _: bool = Depends(require_auth)):
+    order = await get_open_order(table_id)
+    if not order:
+        raise HTTPException(404, "Açık adisyon yok")
+    new_items = [it for it in order["items"] if it["id"] != item_id]
+    if len(new_items) == len(order["items"]):
+        raise HTTPException(404, "Ürün bulunamadı")
+    if not new_items:
+        await db.orders.delete_one({"id": order["id"]})
+        return None
+    total = compute_total(new_items)
+    await db.orders.update_one({"id": order["id"]}, {"$set": {"items": new_items, "total": total}})
+    order = await db.orders.find_one({"id": order["id"]}, {"_id": 0})
+    return order
+
+
+@api_router.post("/orders/table/{table_id}/pay")
+async def pay_order(table_id: str, _: bool = Depends(require_auth)):
+    order = await get_open_order(table_id)
+    if not order:
+        raise HTTPException(404, "Açık adisyon yok")
+    paid_at = datetime.now(timezone.utc).isoformat()
+    await db.orders.update_one(
+        {"id": order["id"]},
+        {"$set": {"status": "paid", "paid_at": paid_at}},
+    )
+    order["status"] = "paid"
+    order["paid_at"] = paid_at
+    return order
+
+
+# --------- QR Public Endpoints (customer-facing, no auth) ---------
+@api_router.get("/public/menu")
+async def public_menu():
+    docs = await db.products.find({}, {"_id": 0}).sort("created_at", 1).to_list(1000)
+    return docs
+
+
+@api_router.get("/public/table/{table_id}")
+async def public_table(table_id: str):
+    t = await db.tables.find_one({"id": table_id}, {"_id": 0})
+    if not t:
+        raise HTTPException(404, "Masa bulunamadı")
+    return {"id": t["id"], "name": t["name"]}
+
+
+@api_router.post("/public/orders/table/{table_id}/add")
+async def public_add(table_id: str, req: AddItemRequest):
+    table = await db.tables.find_one({"id": table_id}, {"_id": 0})
+    if not table:
+        raise HTTPException(404, "Masa bulunamadı")
+    product = await db.products.find_one({"id": req.product_id}, {"_id": 0})
+    if not product:
+        raise HTTPException(404, "Ürün bulunamadı")
+    size_label = None
+    if product["category"] == "hot":
+        if req.size not in ("tall", "grande", "venti"):
+            raise HTTPException(400, "Boy seçiniz")
+        unit_price = product[f"price_{req.size}"]
+        size_label = req.size
+    else:
+        unit_price = product["price"]
+        size_label = "standart" if product["category"] == "cold" else None
+
+    order = await get_open_order(table_id)
+    if not order:
+        order_obj = Order(table_id=table_id, table_name=table["name"], source="qr")
+        order = order_obj.model_dump()
+        await db.orders.insert_one(order)
+
+    merged = False
+    for it in order["items"]:
+        if it["product_id"] == req.product_id and it.get("size") == size_label:
+            it["qty"] += req.qty
+            merged = True
+            break
+    if not merged:
+        item = OrderItem(
+            product_id=req.product_id,
+            name=product["name"],
+            size=size_label,
+            unit_price=unit_price,
+            qty=req.qty,
+        )
+        order["items"].append(item.model_dump())
+
+    order["total"] = compute_total(order["items"])
+    order["source"] = "qr"
+    await db.orders.update_one(
+        {"id": order["id"]},
+        {"$set": {"items": order["items"], "total": order["total"], "source": "qr"}},
+    )
+    return {"ok": True, "total": order["total"]}
+
+
+# --------- Reports ---------
+def _local_day_bounds(ref: datetime) -> (str, str):
+    # Use UTC bounds; simple approach for MVP
+    start = ref.replace(hour=0, minute=0, second=0, microsecond=0)
+    end = start + timedelta(days=1)
+    return start.isoformat(), end.isoformat()
+
+
+def _local_month_bounds(ref: datetime) -> (str, str):
+    start = ref.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
+    if start.month == 12:
+        end = start.replace(year=start.year + 1, month=1)
+    else:
+        end = start.replace(month=start.month + 1)
+    return start.isoformat(), end.isoformat()
+
+
+@api_router.get("/reports/summary")
+async def reports_summary(_: bool = Depends(require_auth)):
+    now = datetime.now(timezone.utc)
+    d_start, d_end = _local_day_bounds(now)
+    m_start, m_end = _local_month_bounds(now)
+
+    async def sum_range(start, end):
+        cursor = db.orders.find({
+            "status": "paid",
+            "paid_at": {"$gte": start, "$lt": end},
+        }, {"_id": 0})
+        total = 0.0
+        count = 0
+        async for o in cursor:
+            total += o.get("total", 0.0)
+            count += 1
+        return round(total, 2), count
+
+    daily_total, daily_count = await sum_range(d_start, d_end)
+    monthly_total, monthly_count = await sum_range(m_start, m_end)
+    return {
+        "daily_total": daily_total,
+        "daily_order_count": daily_count,
+        "monthly_total": monthly_total,
+        "monthly_order_count": monthly_count,
+    }
+
+
+@api_router.get("/reports/products")
+async def reports_products(period: str = "daily", _: bool = Depends(require_auth)):
+    now = datetime.now(timezone.utc)
+    if period == "monthly":
+        start, end = _local_month_bounds(now)
+    else:
+        start, end = _local_day_bounds(now)
+
+    cursor = db.orders.find({
+        "status": "paid",
+        "paid_at": {"$gte": start, "$lt": end},
+    }, {"_id": 0})
+    agg = {}
+    async for o in cursor:
+        for it in o.get("items", []):
+            key = (it["name"], it.get("size") or "-")
+            if key not in agg:
+                agg[key] = {"name": it["name"], "size": it.get("size") or "-", "qty": 0, "revenue": 0.0}
+            agg[key]["qty"] += it["qty"]
+            agg[key]["revenue"] += it["unit_price"] * it["qty"]
+    result = list(agg.values())
+    for r in result:
+        r["revenue"] = round(r["revenue"], 2)
+    result.sort(key=lambda x: -x["qty"])
+    return result
+
+
+# --------- Seed ---------
+@api_router.post("/seed")
+async def seed(_: bool = Depends(require_auth)):
+    p_count = await db.products.count_documents({})
+    t_count = await db.tables.count_documents({})
+    if p_count == 0:
+        seed_products = [
+            {"name": "Espresso", "category": "hot", "price_tall": 55, "price_grande": 65, "price_venti": 75},
+            {"name": "Americano", "category": "hot", "price_tall": 60, "price_grande": 70, "price_venti": 80},
+            {"name": "Latte", "category": "hot", "price_tall": 70, "price_grande": 80, "price_venti": 90},
+            {"name": "Cappuccino", "category": "hot", "price_tall": 70, "price_grande": 80, "price_venti": 90},
+            {"name": "Mocha", "category": "hot", "price_tall": 80, "price_grande": 90, "price_venti": 100},
+            {"name": "Filtre Kahve", "category": "hot", "price_tall": 55, "price_grande": 65, "price_venti": 75},
+            {"name": "Ice Latte", "category": "cold", "price": 85},
+            {"name": "Ice Americano", "category": "cold", "price": 75},
+            {"name": "Ice Mocha", "category": "cold", "price": 95},
+            {"name": "Limonata", "category": "cold", "price": 70},
+            {"name": "Cheesecake", "category": "other", "price": 120},
+            {"name": "Kek", "category": "other", "price": 80},
+            {"name": "Kruvasan", "category": "other", "price": 70},
+            {"name": "Su", "category": "other", "price": 20},
+        ]
+        for sp in seed_products:
+            prod = Product(**sp)
+            await db.products.insert_one(prod.model_dump())
+    if t_count == 0:
+        for i in range(1, 9):
+            tbl = Table(name=f"Masa {i}")
+            await db.tables.insert_one(tbl.model_dump())
+    return {"ok": True}
+
+
+# ---------------------------------------
 app.include_router(api_router)
 
 app.add_middleware(
     CORSMiddleware,
     allow_credentials=True,
-    allow_origins=os.environ.get('CORS_ORIGINS', '*').split(','),
+    allow_origins=os.environ.get("CORS_ORIGINS", "*").split(","),
     allow_methods=["*"],
     allow_headers=["*"],
 )
 
-# Configure logging
-logging.basicConfig(
-    level=logging.INFO,
-    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
-)
+logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(name)s - %(levelname)s - %(message)s")
 logger = logging.getLogger(__name__)
+
 
 @app.on_event("shutdown")
 async def shutdown_db_client():
