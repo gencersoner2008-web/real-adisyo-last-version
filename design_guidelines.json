@@ -1,0 +1,92 @@
+{
+  "theme": "light",
+  "archetype": "ORGANIC & EARTHY",
+  "typography": {
+    "headings": "Outfit",
+    "body": "DM Sans",
+    "hierarchy": {
+      "h1": "text-4xl sm:text-5xl font-bold tracking-tight",
+      "h2": "text-2xl sm:text-3xl font-semibold tracking-tight",
+      "h3": "text-xl font-semibold",
+      "body": "text-base leading-relaxed",
+      "small": "text-sm uppercase tracking-wider"
+    }
+  },
+  "colors": {
+    "background": "#F9F6F0",
+    "surface": "#FFFFFF",
+    "surface_secondary": "#F2EBE1",
+    "primary_text": "#2C1F16",
+    "secondary_text": "#6B5D54",
+    "accent_primary": "#C8664D",
+    "accent_primary_hover": "#A6513A",
+    "accent_secondary": "#768962",
+    "accent_secondary_hover": "#5F704E",
+    "border": "#E6DDD1"
+  },
+  "visual_enhancers": {
+    "shadows": "soft, warm ambient shadows (e.g. shadow-[0_8px_30px_rgb(44,31,22,0.08)])",
+    "borders": "1px solid border with #E6DDD1 to ground soft shadows",
+    "radii": "rounded-2xl for panels and large cards, rounded-xl for product cards, rounded-full for primary action buttons"
+  },
+  "grids": {
+    "pos_layout": "grid grid-cols-1 lg:grid-cols-12 gap-6",
+    "products_area": "col-span-1 lg:col-span-8 grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-4",
+    "cart_area": "col-span-1 lg:col-span-4 sticky top-6 h-[calc(100vh-3rem)] flex flex-col bg-white rounded-3xl p-6 shadow-sm border border-[#E6DDD1]",
+    "table_grid": "grid grid-cols-2 md:grid-cols-4 lg:grid-cols-6 gap-6"
+  },
+  "layouts": {
+    "login": "flex items-center justify-center min-h-screen bg-[#F9F6F0] p-4",
+    "dashboard": "p-6 md:p-8 lg:p-12 space-y-8",
+    "navigation": "flex items-center space-x-2 p-4 bg-white border-b border-[#E6DDD1] sticky top-0 z-50"
+  },
+  "motion": {
+    "hover": "transform -translate-y-1 transition-all duration-200 ease-out",
+    "active": "scale-95 transition-transform duration-100",
+    "page_transition": "animate-in fade-in slide-in-from-bottom-4 duration-500"
+  },
+  "accessibility": {
+    "contrast": "Ensure #2C1F16 on #F9F6F0 meets APCA standards. Use #FFFFFF text on #C8664D and #768962 buttons.",
+    "focus": "focus-visible:ring-2 focus-visible:ring-[#C8664D] focus-visible:ring-offset-2 focus-visible:ring-offset-[#F9F6F0]",
+    "interactive_elements": "Include data-testid attributes (e.g. data-testid='table-card-1', data-testid='pay-button')"
+  },
+  "media": {
+    "image_urls": {
+      "login_bg": "https://images.unsplash.com/photo-1598959652545-c0230cdbb01f?crop=entropy&cs=srgb&fm=jpg&ixid=M3w3NTY2Nzd8MHwxfHNlYXJjaHwxfHxjb2ZmZWUlMjBzaG9wJTIwaW50ZXJpb3IlMjB3YXJtJTIwbGlnaHRpbmd8ZW58MHx8fHwxNzg1OTY1MjgyfDA&ixlib=rb-4.1.0&q=85",
+      "category_hot": "https://images.unsplash.com/photo-1506188044630-210826194885?crop=entropy&cs=srgb&fm=jpg&ixid=M3w3NDk1Nzh8MHwxfHNlYXJjaHwzfHxsYXR0ZSUyMGFydCUyMGNvZmZlZSUyMGN1cCUyMHRvcCUyMHZpZXd8ZW58MHx8fHwxNzg1OTY1MjgxfDA&ixlib=rb-4.1.0&q=85",
+      "category_cold": "https://images.unsplash.com/photo-1461023058943-07fcbe16d735?crop=entropy&cs=srgb&fm=jpg&ixid=M3w4NjY2NzN8MHwxfHNlYXJjaHwyfHxpY2VkJTIwY29mZmVlJTIwY29sZCUyMGRyaW5rJTIwZ2xhc3N8ZW58MHx8fHwxNzg1OTY1MjgyfDA&ixlib=rb-4.1.0&q=85",
+      "category_other": "https://images.unsplash.com/photo-1599940778173-e276d4acb2bb?crop=entropy&cs=srgb&fm=jpg&ixid=M3w3NDk1Nzh8MHwxfHNlYXJjaHwzfHxjcm9pc3NhbnQlMjBwYXN0cnklMjBjYWZlJTIwZm9vZHxlbnwwfHx8fDE3ODU5NjUyODJ8MA&ixlib=rb-4.1.0&q=85"
+    }
+  },
+  "instructions_to_main_agent": [
+    "Build a POS application for 'REAL COFFEE ADİSYON' in Turkish.",
+    "Use Phosphor Icons (@phosphor-icons/react) for standard POS icons (tables, products, settings, cart).",
+    "Implement Shadcn/UI for tables, dialogs, dropdowns, and toast (sonner).",
+    "Avoid Vercel-like tech styling; apply custom colors (#F9F6F0 bg, #2C1F16 text, #C8664D accents) to all Shadcn components.",
+    "Do NOT use HTML <select> or <input type='date'>. Use Shadcn components.",
+    "For the POS order screen, use the Bento layout defined in grids. Left side for category tabs and product cards. Right side for Adisyon (Cart).",
+    "Sıcak İçecekler (Hot Drinks) must have 3 sizes: Tall, Grande, Venti (each with different prices). Create a custom dialog or inline selector for these sizes when clicking the product.",
+    "Soğuk İçecekler (Cold Drinks) and Diğer Ürünler (Other) have a single size/price.",
+    "Currency is TL (₺). Format numbers accordingly.",
+    "Order panel must have an 'Öde' (Pay) button that triggers a browser print window (`window.print()`).",
+    "Ensure the Dashboard view displays Daily and Monthly total sales as large cards (Neumorphic tactile look) and lists sold products.",
+    "Provide management screens for Products (add/edit/delete, update prices) and Tables (add/delete).",
+    "Implement a simple password login screen with the provided background image.",
+    "Use Sonner for all success/error notifications (e.g., 'Ürün eklendi', 'Masa silindi').",
+    "All interactive elements MUST have a data-testid attribute in kebab-case."
+  ],
+  "UNIVERSAL_GUIDELINES_FOR_MAIN_AGENT": [
+    "Do not use dark colors as gradients.",
+    "Do not make generic centered layouts. Left-align text inputs and labels.",
+    "Create depth through layered design elements with z-index hierarchy and warm shadows.",
+    "You MUST NOT apply universal transition (e.g., transition: all). Apply specific transitions like transition-colors, transition-transform.",
+    "You MUST NOT center align the app container (.App { text-align: center; } is forbidden).",
+    "Always use modern button styles (pill-shaped or rounded-full for primary POS actions).",
+    "NEVER use emoji characters like 🤖 for icons. Use Phosphor Icons.",
+    "Use 2-3x more spacing than feels comfortable. Make touch targets large.",
+    "Provide empty states with clear CTAs when tables or products are empty.",
+    "Prioritize using pre-existing components from src/components/ui when applicable.",
+    "The codebase uses .js files, not .tsx. Adjust Shadcn component imports and configurations accordingly.",
+    "Use light theme by default for better daytime legibility."
+  ]
+}
