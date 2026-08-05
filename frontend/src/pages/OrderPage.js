@@ -7,11 +7,13 @@ import {
   Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter,
 } from "@/components/ui/dialog";
 import { toast } from "sonner";
-import { ArrowLeft, Flame, Snowflake, Cookie, Plus, Minus, Trash2, Printer, QrCode } from "lucide-react";
+import { ArrowLeft, Flame, Snowflake, Cookie, Plus, Minus, Trash2, Printer, QrCode, StickyNote } from "lucide-react";
 import Receipt from "@/components/Receipt";
 import PrinterButton from "@/components/PrinterButton";
 import { usePrinter } from "@/context/PrinterContext";
 import { playChime } from "@/lib/chime";
+import { Popover, PopoverTrigger, PopoverContent } from "@/components/ui/popover";
+import { Textarea } from "@/components/ui/textarea";
 
 const catMeta = {
   hot: { label: "Sıcak İçecekler", icon: Flame },
@@ -29,6 +31,25 @@ export default function OrderPage() {
   const [sizePicker, setSizePicker] = useState(null); // product being sized
   const [category, setCategory] = useState("hot");
   const [receiptData, setReceiptData] = useState(null);
+  const [noteOpen, setNoteOpen] = useState(false);
+  const [noteDraft, setNoteDraft] = useState("");
+  const [savingNote, setSavingNote] = useState(false);
+
+  const openNote = () => { setNoteDraft(table?.note || ""); setNoteOpen(true); };
+  const saveNote = async () => {
+    setSavingNote(true);
+    try {
+      const { data } = await api.put(`/tables/${tableId}/note`, { note: noteDraft });
+      setTable((t) => (t ? { ...t, note: data.note } : t));
+      toast.success(data.note ? "Masa notu kaydedildi" : "Masa notu temizlendi");
+      setNoteOpen(false);
+    } catch (_) {
+      toast.error("Not kaydedilemedi");
+    } finally {
+      setSavingNote(false);
+    }
+  };
+  const clearNote = async () => { setNoteDraft(""); };
 
   const load = async () => {
     const [p, o, tl] = await Promise.all([
@@ -149,6 +170,43 @@ export default function OrderPage() {
             <div>
               <p className="text-xs uppercase tracking-[0.24em] text-[#6B5D54]">Sipariş</p>
               <h1 className="font-display text-3xl font-bold">{table?.name || "Masa"}</h1>
+              <Popover open={noteOpen} onOpenChange={(o) => { if (o) openNote(); else setNoteOpen(false); }}>
+                <PopoverTrigger asChild>
+                  <button
+                    data-testid="table-note-btn"
+                    className={`mt-2 inline-flex items-center gap-2 max-w-md rounded-full px-3 py-1.5 text-xs transition-colors ${
+                      table?.note
+                        ? "bg-[#FFF4E6] text-[#8A5A2B] border border-[#F2D9B6] hover:bg-[#FEE9CD]"
+                        : "border border-dashed border-[#E6DDD1] text-[#6B5D54] hover:bg-[#F2EBE1]"
+                    }`}
+                  >
+                    <StickyNote className="w-3.5 h-3.5 shrink-0" />
+                    <span className="truncate">{table?.note || "Masa notu ekle"}</span>
+                  </button>
+                </PopoverTrigger>
+                <PopoverContent align="start" className="w-96 rounded-2xl border-[#E6DDD1]">
+                  <div className="space-y-3">
+                    <div>
+                      <p className="font-display text-lg font-semibold text-[#2C1F16]">Masa Notu</p>
+                      <p className="text-xs text-[#6B5D54]">Kısa hatırlatma. Örn: "Yakında pay bölüşecek", "Süt hassasiyeti", "17:30'da rezerve".</p>
+                    </div>
+                    <Textarea
+                      data-testid="table-note-textarea"
+                      value={noteDraft}
+                      onChange={(e) => setNoteDraft(e.target.value.slice(0, 280))}
+                      placeholder="Not yazın..."
+                      className="min-h-[100px] bg-white border-[#E6DDD1] focus-visible:ring-[#C8664D]"
+                    />
+                    <div className="flex items-center justify-between">
+                      <span className="text-[10px] text-[#6B5D54]">{noteDraft.length}/280</span>
+                      <div className="flex items-center gap-2">
+                        <Button data-testid="table-note-clear" size="sm" variant="ghost" onClick={clearNote} disabled={savingNote} className="text-[#6B5D54]">Temizle</Button>
+                        <Button data-testid="table-note-save" size="sm" onClick={saveNote} disabled={savingNote} className="rounded-full bg-[#C8664D] hover:bg-[#A6513A] text-white">Kaydet</Button>
+                      </div>
+                    </div>
+                  </div>
+                </PopoverContent>
+              </Popover>
             </div>
           </div>
           <div className="flex items-center gap-3">

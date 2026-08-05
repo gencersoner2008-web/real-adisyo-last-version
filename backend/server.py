@@ -56,7 +56,12 @@ class TableCreate(BaseModel):
 class Table(BaseModel):
     id: str = Field(default_factory=lambda: str(uuid.uuid4()))
     name: str
+    note: str = ""
     created_at: str = Field(default_factory=lambda: datetime.now(timezone.utc).isoformat())
+
+
+class TableNoteUpdate(BaseModel):
+    note: str = ""
 
 
 class OrderItem(BaseModel):
@@ -128,6 +133,7 @@ async def _table_snapshot(table_id: str) -> Optional[dict]:
         return None
     return {
         **t,
+        "note": t.get("note", ""),
         "has_open_order": bool(order),
         "open_total": order["total"] if order else 0.0,
         "open_item_count": sum(i["qty"] for i in order["items"]) if order else 0,
@@ -289,6 +295,19 @@ async def delete_table(table_id: str, _: bool = Depends(require_auth)):
         raise HTTPException(404, "Masa bulunamadı")
     await _publish(_channel_tables(), "table_deleted", {"id": table_id})
     return {"ok": True}
+
+
+@api_router.put("/tables/{table_id}/note")
+async def update_table_note(table_id: str, req: TableNoteUpdate, _: bool = Depends(require_auth)):
+    t = await db.tables.find_one({"id": table_id}, {"_id": 0})
+    if not t:
+        raise HTTPException(404, "Masa bulunamadı")
+    note = (req.note or "").strip()[:280]
+    await db.tables.update_one({"id": table_id}, {"$set": {"note": note}})
+    snap = await _table_snapshot(table_id)
+    if snap:
+        await _publish(_channel_tables(), "table", snap)
+    return {"id": table_id, "note": note}
 
 
 # --------- Orders / Adisyon ---------

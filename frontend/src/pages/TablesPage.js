@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { api, formatTL, API } from "@/lib/api";
-import { Coffee, Users, Plus } from "lucide-react";
+import { Coffee, Users, Plus, StickyNote } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { toast } from "sonner";
 import { Link } from "react-router-dom";
@@ -137,6 +137,18 @@ export default function TablesPage() {
                   <Users className="w-3.5 h-3.5" />
                   {t.has_open_order ? `${t.open_item_count} ürün • ${formatTL(t.open_total)}` : "Boş"}
                 </div>
+                {t.note && (
+                  <div
+                    data-testid={`table-note-${t.id}`}
+                    className={`mt-3 flex items-start gap-1.5 text-xs rounded-lg px-2 py-1.5 ${
+                      t.has_open_order ? "bg-white/15 text-white/90" : "bg-[#FFF4E6] text-[#8A5A2B]"
+                    }`}
+                    title={t.note}
+                  >
+                    <StickyNote className="w-3 h-3 shrink-0 mt-[1px]" />
+                    <span className="line-clamp-2 leading-snug break-words">{t.note}</span>
+                  </div>
+                )}
               </button>
             ))}
           </div>
