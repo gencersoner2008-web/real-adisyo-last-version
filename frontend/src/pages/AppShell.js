@@ -1,7 +1,10 @@
+import { useState } from "react";
 import { NavLink, Outlet, useNavigate } from "react-router-dom";
 import { useAuth } from "@/context/AuthContext";
-import { Coffee, LayoutGrid, Package, Grid3x3, BarChart3, LogOut } from "lucide-react";
+import { Coffee, LayoutGrid, Package, Grid3x3, BarChart3, LogOut, Bell, BellOff } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { isMuted, setMuted, playChime } from "@/lib/chime";
+import { toast } from "sonner";
 
 const navItems = [
   { to: "/", label: "Masalar", icon: LayoutGrid, end: true, testid: "nav-tables" },
@@ -13,6 +16,19 @@ const navItems = [
 export default function AppShell() {
   const { logout } = useAuth();
   const navigate = useNavigate();
+  const [muted, setMutedState] = useState(isMuted());
+
+  const toggleMute = () => {
+    const next = !muted;
+    setMuted(next);
+    setMutedState(next);
+    if (!next) {
+      playChime(); // preview chime when un-muting
+      toast.success("Sipariş sesi açıldı");
+    } else {
+      toast.message("Sipariş sesi kapatıldı");
+    }
+  };
 
   return (
     <div className="min-h-screen bg-[#F9F6F0]">
@@ -49,15 +65,27 @@ export default function AppShell() {
             ))}
           </nav>
 
-          <Button
-            variant="ghost"
-            data-testid="logout-btn"
-            onClick={() => { logout(); navigate("/login"); }}
-            className="text-[#6B5D54] hover:text-[#2C1F16] hover:bg-[#F2EBE1]"
-          >
-            <LogOut className="w-4 h-4 mr-2" />
-            <span className="hidden sm:inline">Çıkış</span>
-          </Button>
+          <div className="flex items-center gap-1">
+            <Button
+              variant="ghost"
+              size="sm"
+              data-testid="mute-toggle-btn"
+              onClick={toggleMute}
+              title={muted ? "Sipariş sesi kapalı" : "Sipariş sesi açık"}
+              className={`rounded-full h-9 w-9 p-0 ${muted ? "text-[#C8664D]" : "text-[#5F704E]"} hover:bg-[#F2EBE1]`}
+            >
+              {muted ? <BellOff className="w-4 h-4" /> : <Bell className="w-4 h-4" />}
+            </Button>
+            <Button
+              variant="ghost"
+              data-testid="logout-btn"
+              onClick={() => { logout(); navigate("/login"); }}
+              className="text-[#6B5D54] hover:text-[#2C1F16] hover:bg-[#F2EBE1]"
+            >
+              <LogOut className="w-4 h-4 mr-2" />
+              <span className="hidden sm:inline">Çıkış</span>
+            </Button>
+          </div>
         </div>
       </header>
 

@@ -6,6 +6,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { toast } from "sonner";
 import { Coffee, Lock } from "lucide-react";
+import { primeAudio } from "@/lib/chime";
 
 export default function LoginPage() {
   const { login } = useAuth();
@@ -16,6 +17,7 @@ export default function LoginPage() {
   const submit = async (e) => {
     e.preventDefault();
     setLoading(true);
+    primeAudio(); // unlock Web Audio on user gesture
     try {
       await login(password);
       toast.success("Hoş geldiniz");

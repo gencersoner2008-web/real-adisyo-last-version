@@ -11,6 +11,7 @@ import { ArrowLeft, Flame, Snowflake, Cookie, Plus, Minus, Trash2, Printer, QrCo
 import Receipt from "@/components/Receipt";
 import PrinterButton from "@/components/PrinterButton";
 import { usePrinter } from "@/context/PrinterContext";
+import { playChime } from "@/lib/chime";
 
 const catMeta = {
   hot: { label: "Sıcak İçecekler", icon: Flame },
@@ -57,6 +58,7 @@ export default function OrderPage() {
         const count = data.items?.reduce((s, i) => s + i.qty, 0) ?? 0;
         if (prevRef.total !== null && (count > (prevRef.count ?? 0) || total > (prevRef.total ?? 0))) {
           toast.message("QR: Müşteri sipariş gönderdi", { description: `Toplam ${count} ürün • ${formatTL(total)}` });
+          playChime();
         }
         prevRef.total = total;
         prevRef.count = count;

@@ -5,6 +5,7 @@ import { Coffee, Users, Plus } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { toast } from "sonner";
 import { Link } from "react-router-dom";
+import { playChime } from "@/lib/chime";
 
 export default function TablesPage() {
   const [tables, setTables] = useState([]);
@@ -53,6 +54,7 @@ export default function TablesPage() {
             toast.message("QR sipariş geldi", {
               description: `${upd.name} • ${upd.open_item_count} ürün • ${formatTL(upd.open_total)}`,
             });
+            playChime();
           }
           return next;
         });
