@@ -9,6 +9,8 @@ import {
 import { toast } from "sonner";
 import { ArrowLeft, Flame, Snowflake, Cookie, Plus, Minus, Trash2, Printer, QrCode } from "lucide-react";
 import Receipt from "@/components/Receipt";
+import PrinterButton from "@/components/PrinterButton";
+import { usePrinter } from "@/context/PrinterContext";
 
 const catMeta = {
   hot: { label: "Sıcak İçecekler", icon: Flame },
@@ -19,6 +21,7 @@ const catMeta = {
 export default function OrderPage() {
   const { tableId } = useParams();
   const navigate = useNavigate();
+  const printer = usePrinter();
   const [products, setProducts] = useState([]);
   const [order, setOrder] = useState(null);
   const [table, setTable] = useState(null);
@@ -82,13 +85,24 @@ export default function OrderPage() {
     if (!order || order.items.length === 0) return;
     try {
       const { data } = await api.post(`/orders/table/${tableId}/pay`);
-      setReceiptData(data);
-      // Wait a tick then print
-      setTimeout(() => {
-        window.print();
-      }, 250);
       setOrder(null);
-      toast.success("Ödeme alındı, fiş yazdırılıyor");
+
+      if (printer?.connected) {
+        // ESC/POS direct print to thermal printer
+        try {
+          await printer.print(data);
+          toast.success("Ödeme alındı, termal yazıcıya gönderildi");
+        } catch (err) {
+          toast.error("Yazıcı hatası: " + (err?.message || "bilinmiyor") + " • Tarayıcı yazdırma açılıyor");
+          setReceiptData(data);
+          setTimeout(() => window.print(), 250);
+        }
+      } else {
+        // Fallback: browser print window
+        setReceiptData(data);
+        setTimeout(() => window.print(), 250);
+        toast.success("Ödeme alındı, fiş yazdırılıyor");
+      }
     } catch (e) {
       toast.error(e?.response?.data?.detail || "Ödeme başarısız");
     }
@@ -114,16 +128,19 @@ export default function OrderPage() {
               <h1 className="font-display text-3xl font-bold">{table?.name || "Masa"}</h1>
             </div>
           </div>
-          <a
-            href={qrUrl}
-            target="_blank"
-            rel="noreferrer"
-            data-testid="qr-link"
-            className="hidden sm:inline-flex items-center gap-2 text-xs text-[#6B5D54] hover:text-[#2C1F16]"
-          >
-            <QrCode className="w-4 h-4" />
-            QR Sipariş linki
-          </a>
+          <div className="flex items-center gap-3">
+            <PrinterButton />
+            <a
+              href={qrUrl}
+              target="_blank"
+              rel="noreferrer"
+              data-testid="qr-link"
+              className="hidden sm:inline-flex items-center gap-2 text-xs text-[#6B5D54] hover:text-[#2C1F16]"
+            >
+              <QrCode className="w-4 h-4" />
+              QR Sipariş linki
+            </a>
+          </div>
         </div>
 
         <Tabs value={category} onValueChange={setCategory}>

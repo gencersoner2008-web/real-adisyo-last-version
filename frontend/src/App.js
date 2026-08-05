@@ -1,6 +1,7 @@
 import "@/App.css";
 import { BrowserRouter, Routes, Route, Navigate } from "react-router-dom";
 import { AuthProvider, useAuth } from "@/context/AuthContext";
+import { PrinterProvider } from "@/context/PrinterContext";
 import { Toaster } from "@/components/ui/sonner";
 import LoginPage from "@/pages/LoginPage";
 import AppShell from "@/pages/AppShell";
@@ -22,6 +23,7 @@ function App() {
   return (
     <div className="App">
       <AuthProvider>
+        <PrinterProvider>
         <BrowserRouter>
           <Routes>
             <Route path="/login" element={<LoginPage />} />
@@ -44,6 +46,7 @@ function App() {
           </Routes>
         </BrowserRouter>
         <Toaster richColors position="top-right" />
+        </PrinterProvider>
       </AuthProvider>
     </div>
   );
