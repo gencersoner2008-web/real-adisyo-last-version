@@ -1,8 +1,9 @@
 import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { api, formatTL } from "@/lib/api";
+import { api, formatTL, API } from "@/lib/api";
 import { Coffee, Users, Plus } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { toast } from "sonner";
 import { Link } from "react-router-dom";
 
 export default function TablesPage() {
@@ -26,6 +27,47 @@ export default function TablesPage() {
   };
 
   useEffect(() => { load(); }, []);
+
+  // Real-time push: watch all tables for QR / any order changes
+  useEffect(() => {
+    const token = localStorage.getItem("rc_token");
+    if (!token) return;
+    const es = new EventSource(`${API}/tables/stream?token=${encodeURIComponent(token)}`);
+    es.addEventListener("snapshot", (e) => {
+      try {
+        const snap = JSON.parse(e.data);
+        setTables(snap);
+      } catch (_) { /* ignore */ }
+    });
+    es.addEventListener("table", (e) => {
+      try {
+        const upd = JSON.parse(e.data);
+        setTables((prev) => {
+          const idx = prev.findIndex((t) => t.id === upd.id);
+          if (idx === -1) return [...prev, upd];
+          const next = prev.slice();
+          const before = next[idx];
+          next[idx] = upd;
+          // Toast when a QR customer just added items and this table becomes/is open
+          if (upd.has_open_order && upd.open_item_count > (before?.open_item_count || 0)) {
+            toast.message("QR sipariş geldi", {
+              description: `${upd.name} • ${upd.open_item_count} ürün • ${formatTL(upd.open_total)}`,
+            });
+          }
+          return next;
+        });
+        // Refresh summary lightly
+        api.get("/reports/summary").then((r) => setSummary(r.data)).catch(() => {});
+      } catch (_) { /* ignore */ }
+    });
+    es.addEventListener("table_deleted", (e) => {
+      try {
+        const { id } = JSON.parse(e.data);
+        setTables((prev) => prev.filter((t) => t.id !== id));
+      } catch (_) { /* ignore */ }
+    });
+    return () => es.close();
+  }, []);
 
   return (
     <div className="space-y-8">

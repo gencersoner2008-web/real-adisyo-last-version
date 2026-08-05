@@ -1,12 +1,15 @@
-from fastapi import FastAPI, APIRouter, HTTPException, Depends, Header
+from fastapi import FastAPI, APIRouter, HTTPException, Depends, Header, Request
+from fastapi.responses import StreamingResponse
 from dotenv import load_dotenv
 from starlette.middleware.cors import CORSMiddleware
 from motor.motor_asyncio import AsyncIOMotorClient
 import os
+import json
+import asyncio
 import logging
 from pathlib import Path
 from pydantic import BaseModel, Field, ConfigDict
-from typing import List, Optional, Literal
+from typing import List, Optional, Literal, Dict
 import uuid
 from datetime import datetime, timezone, timedelta
 
@@ -94,6 +97,49 @@ def require_auth(authorization: Optional[str] = Header(None)):
     return True
 
 
+# --------- Realtime pubsub (SSE) ---------
+# channel -> list of asyncio.Queue subscribers
+_subs: Dict[str, List[asyncio.Queue]] = {}
+
+
+def _channel_order(table_id: str) -> str:
+    return f"order:{table_id}"
+
+
+def _channel_tables() -> str:
+    return "tables:all"
+
+
+async def _publish(channel: str, event_type: str, data) -> None:
+    payload = {"type": event_type, "data": data}
+    for q in list(_subs.get(channel, [])):
+        try:
+            q.put_nowait(payload)
+        except asyncio.QueueFull:
+            pass
+
+
+async def _table_snapshot(table_id: str) -> Optional[dict]:
+    order = await get_open_order(table_id)
+    t = await db.tables.find_one({"id": table_id}, {"_id": 0})
+    if not t:
+        return None
+    return {
+        **t,
+        "has_open_order": bool(order),
+        "open_total": order["total"] if order else 0.0,
+        "open_item_count": sum(i["qty"] for i in order["items"]) if order else 0,
+    }
+
+
+async def _broadcast_order_change(table_id: str) -> None:
+    order = await get_open_order(table_id)
+    await _publish(_channel_order(table_id), "order", order)
+    snap = await _table_snapshot(table_id)
+    if snap is not None:
+        await _publish(_channel_tables(), "table", snap)
+
+
 # --------- Utility ---------
 def compute_total(items: List[dict]) -> float:
     return round(sum(i["unit_price"] * i["qty"] for i in items), 2)
@@ -175,6 +221,9 @@ async def list_tables(_: bool = Depends(require_auth)):
 async def create_table(t: TableCreate, _: bool = Depends(require_auth)):
     tbl = Table(name=t.name)
     await db.tables.insert_one(tbl.model_dump())
+    snap = await _table_snapshot(tbl.id)
+    if snap:
+        await _publish(_channel_tables(), "table", snap)
     return tbl
 
 
@@ -186,6 +235,7 @@ async def delete_table(table_id: str, _: bool = Depends(require_auth)):
     res = await db.tables.delete_one({"id": table_id})
     if res.deleted_count == 0:
         raise HTTPException(404, "Masa bulunamadı")
+    await _publish(_channel_tables(), "table_deleted", {"id": table_id})
     return {"ok": True}
 
 
@@ -242,6 +292,7 @@ async def add_item(table_id: str, req: AddItemRequest, _: bool = Depends(require
     order["total"] = compute_total(order["items"])
     await db.orders.update_one({"id": order["id"]}, {"$set": {"items": order["items"], "total": order["total"]}})
     order = await db.orders.find_one({"id": order["id"]}, {"_id": 0})
+    await _broadcast_order_change(table_id)
     return order
 
 
@@ -265,10 +316,12 @@ async def remove_item(table_id: str, item_id: str, _: bool = Depends(require_aut
         raise HTTPException(404, "Ürün bulunamadı")
     if not new_items:
         await db.orders.delete_one({"id": order["id"]})
+        await _broadcast_order_change(table_id)
         return None
     total = compute_total(new_items)
     await db.orders.update_one({"id": order["id"]}, {"$set": {"items": new_items, "total": total}})
     order = await db.orders.find_one({"id": order["id"]}, {"_id": 0})
+    await _broadcast_order_change(table_id)
     return order
 
 
@@ -282,10 +335,12 @@ async def delete_item(table_id: str, item_id: str, _: bool = Depends(require_aut
         raise HTTPException(404, "Ürün bulunamadı")
     if not new_items:
         await db.orders.delete_one({"id": order["id"]})
+        await _broadcast_order_change(table_id)
         return None
     total = compute_total(new_items)
     await db.orders.update_one({"id": order["id"]}, {"$set": {"items": new_items, "total": total}})
     order = await db.orders.find_one({"id": order["id"]}, {"_id": 0})
+    await _broadcast_order_change(table_id)
     return order
 
 
@@ -301,7 +356,65 @@ async def pay_order(table_id: str, _: bool = Depends(require_auth)):
     )
     order["status"] = "paid"
     order["paid_at"] = paid_at
+    await _broadcast_order_change(table_id)
     return order
+
+
+# --------- SSE realtime streams ---------
+def _sse_check_token(token: str) -> None:
+    if token != SESSION_TOKEN:
+        raise HTTPException(status_code=401, detail="Yetkisiz")
+
+
+async def _sse_stream(channel: str, initial_event: Optional[dict], request: Request):
+    q: asyncio.Queue = asyncio.Queue(maxsize=100)
+    _subs.setdefault(channel, []).append(q)
+
+    async def gen():
+        try:
+            yield ": connected\n\n"
+            if initial_event:
+                yield f"event: {initial_event['type']}\ndata: {json.dumps(initial_event['data'])}\n\n"
+            while True:
+                if await request.is_disconnected():
+                    break
+                try:
+                    ev = await asyncio.wait_for(q.get(), timeout=20.0)
+                    yield f"event: {ev['type']}\ndata: {json.dumps(ev['data'])}\n\n"
+                except asyncio.TimeoutError:
+                    yield ": ping\n\n"
+        finally:
+            try:
+                _subs.get(channel, []).remove(q)
+            except ValueError:
+                pass
+
+    return StreamingResponse(
+        gen(),
+        media_type="text/event-stream",
+        headers={"Cache-Control": "no-cache, no-transform", "X-Accel-Buffering": "no", "Connection": "keep-alive"},
+    )
+
+
+@api_router.get("/orders/stream/{table_id}")
+async def stream_order(table_id: str, request: Request, token: str = ""):
+    _sse_check_token(token)
+    initial = {"type": "order", "data": await get_open_order(table_id)}
+    return await _sse_stream(_channel_order(table_id), initial, request)
+
+
+@api_router.get("/tables/stream")
+async def stream_tables(request: Request, token: str = ""):
+    _sse_check_token(token)
+    # Send initial snapshot of all tables
+    tables = await db.tables.find({}, {"_id": 0}).sort("created_at", 1).to_list(500)
+    payload = []
+    for t in tables:
+        snap = await _table_snapshot(t["id"])
+        if snap:
+            payload.append(snap)
+    initial = {"type": "snapshot", "data": payload}
+    return await _sse_stream(_channel_tables(), initial, request)
 
 
 # --------- QR Public Endpoints (customer-facing, no auth) ---------
@@ -365,6 +478,7 @@ async def public_add(table_id: str, req: AddItemRequest):
         {"id": order["id"]},
         {"$set": {"items": order["items"], "total": order["total"], "source": "qr"}},
     )
+    await _broadcast_order_change(table_id)
     return {"ok": True, "total": order["total"]}
 
 

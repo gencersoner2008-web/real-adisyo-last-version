@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
-import { api, formatTL, sizeLabel } from "@/lib/api";
+import { api, formatTL, sizeLabel, API } from "@/lib/api";
 import { Button } from "@/components/ui/button";
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
 import {
@@ -41,15 +41,36 @@ export default function OrderPage() {
   };
 
   useEffect(() => { load(); }, [tableId]);
-  // Polling for QR-driven updates
+  // Real-time push via SSE
   useEffect(() => {
-    const t = setInterval(async () => {
-      try {
-        const { data } = await api.get(`/orders/table/${tableId}`);
-        setOrder(data || null);
-      } catch (_e) { /* ignore poll errors */ }
-    }, 5000);
-    return () => clearInterval(t);
+    const token = localStorage.getItem("rc_token");
+    if (!token) return;
+    const url = `${API}/orders/stream/${tableId}?token=${encodeURIComponent(token)}`;
+    const es = new EventSource(url);
+    const prevRef = { total: null, count: null };
+    es.addEventListener("order", (e) => {
+      let data = null;
+      try { data = JSON.parse(e.data); } catch { data = null; }
+      // Notify when a QR customer sent something
+      if (data && data.source === "qr") {
+        const total = data.total;
+        const count = data.items?.reduce((s, i) => s + i.qty, 0) ?? 0;
+        if (prevRef.total !== null && (count > (prevRef.count ?? 0) || total > (prevRef.total ?? 0))) {
+          toast.message("QR: Müşteri sipariş gönderdi", { description: `Toplam ${count} ürün • ${formatTL(total)}` });
+        }
+        prevRef.total = total;
+        prevRef.count = count;
+      } else if (data) {
+        prevRef.total = data.total;
+        prevRef.count = data.items?.reduce((s, i) => s + i.qty, 0) ?? 0;
+      } else {
+        prevRef.total = null;
+        prevRef.count = null;
+      }
+      setOrder(data);
+    });
+    es.onerror = () => { /* let browser auto-reconnect */ };
+    return () => es.close();
   }, [tableId]);
 
   const grouped = useMemo(() => {
