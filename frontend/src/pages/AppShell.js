@@ -5,6 +5,7 @@ import { Coffee, LayoutGrid, Package, Grid3x3, BarChart3, LogOut, Bell, BellOff 
 import { Button } from "@/components/ui/button";
 import { isMuted, setMuted, playChime } from "@/lib/chime";
 import { toast } from "sonner";
+import HappyHourButton from "@/components/HappyHourButton";
 
 const navItems = [
   { to: "/", label: "Masalar", icon: LayoutGrid, end: true, testid: "nav-tables" },
@@ -65,7 +66,8 @@ export default function AppShell() {
             ))}
           </nav>
 
-          <div className="flex items-center gap-1">
+          <div className="flex items-center gap-2">
+            <HappyHourButton />
             <Button
               variant="ghost"
               size="sm"

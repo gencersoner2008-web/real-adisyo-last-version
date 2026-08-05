@@ -262,6 +262,18 @@ export default function OrderPage() {
           </div>
 
           <div className="mt-5 pt-4 border-t border-[#E6DDD1]">
+            {order && order.discount_percent > 0 && order.subtotal > 0 && (
+              <div className="mb-3 space-y-1.5 text-sm">
+                <div className="flex justify-between text-[#6B5D54]">
+                  <span>Ara Toplam</span>
+                  <span data-testid="cart-subtotal">{formatTL(order.subtotal)}</span>
+                </div>
+                <div className="flex justify-between text-[#C8664D] font-medium">
+                  <span>Happy Hour (-%{order.discount_percent})</span>
+                  <span data-testid="cart-discount">-{formatTL(order.subtotal - order.total)}</span>
+                </div>
+              </div>
+            )}
             <div className="flex items-baseline justify-between mb-4">
               <p className="text-xs uppercase tracking-[0.24em] text-[#6B5D54]">Toplam</p>
               <p data-testid="cart-total" className="font-display text-3xl font-bold text-[#2C1F16]">

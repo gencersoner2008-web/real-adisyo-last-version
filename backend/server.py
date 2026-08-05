@@ -86,6 +86,8 @@ class Order(BaseModel):
     status: Literal["open", "paid"] = "open"
     created_at: str = Field(default_factory=lambda: datetime.now(timezone.utc).isoformat())
     paid_at: Optional[str] = None
+    subtotal: float = 0.0
+    discount_percent: int = 0
     total: float = 0.0
     source: Literal["staff", "qr"] = "staff"
 
@@ -141,8 +143,25 @@ async def _broadcast_order_change(table_id: str) -> None:
 
 
 # --------- Utility ---------
-def compute_total(items: List[dict]) -> float:
+def compute_subtotal(items: List[dict]) -> float:
     return round(sum(i["unit_price"] * i["qty"] for i in items), 2)
+
+
+async def _get_settings() -> dict:
+    doc = await db.settings.find_one({"_id": "app"}) or {}
+    return {
+        "happy_hour_enabled": bool(doc.get("happy_hour_enabled", False)),
+        "happy_hour_percent": int(doc.get("happy_hour_percent", 15)),
+    }
+
+
+async def apply_current_totals(order: dict) -> None:
+    settings = await _get_settings()
+    pct = settings["happy_hour_percent"] if settings["happy_hour_enabled"] else 0
+    order["discount_percent"] = pct
+    sub = compute_subtotal(order.get("items", []))
+    order["subtotal"] = sub
+    order["total"] = round(sub * (1 - pct / 100.0), 2)
 
 
 async def get_open_order(table_id: str) -> Optional[dict]:
@@ -160,6 +179,39 @@ async def login(req: LoginRequest):
 @api_router.get("/auth/verify")
 async def verify(_: bool = Depends(require_auth)):
     return {"ok": True}
+
+
+# --------- Settings (Happy Hour) ---------
+class SettingsUpdate(BaseModel):
+    happy_hour_enabled: Optional[bool] = None
+    happy_hour_percent: Optional[int] = None
+
+
+@api_router.get("/settings")
+async def get_settings(_: bool = Depends(require_auth)):
+    return await _get_settings()
+
+
+@api_router.put("/settings")
+async def update_settings(req: SettingsUpdate, _: bool = Depends(require_auth)):
+    update = {}
+    if req.happy_hour_enabled is not None:
+        update["happy_hour_enabled"] = bool(req.happy_hour_enabled)
+    if req.happy_hour_percent is not None:
+        update["happy_hour_percent"] = max(0, min(90, int(req.happy_hour_percent)))
+    if update:
+        await db.settings.update_one({"_id": "app"}, {"$set": update}, upsert=True)
+    settings = await _get_settings()
+    # Re-apply to all open orders and broadcast to staff clients
+    async for o in db.orders.find({"status": "open"}, {"_id": 0}):
+        await apply_current_totals(o)
+        await db.orders.update_one({"id": o["id"]}, {"$set": {
+            "subtotal": o["subtotal"],
+            "total": o["total"],
+            "discount_percent": o["discount_percent"],
+        }})
+        await _broadcast_order_change(o["table_id"])
+    return settings
 
 
 # --------- Products ---------
@@ -289,8 +341,14 @@ async def add_item(table_id: str, req: AddItemRequest, _: bool = Depends(require
         )
         order["items"].append(item.model_dump())
 
-    order["total"] = compute_total(order["items"])
-    await db.orders.update_one({"id": order["id"]}, {"$set": {"items": order["items"], "total": order["total"]}})
+    order["total"] = compute_subtotal(order["items"])  # placeholder overridden below
+    await apply_current_totals(order)
+    await db.orders.update_one({"id": order["id"]}, {"$set": {
+        "items": order["items"],
+        "subtotal": order["subtotal"],
+        "total": order["total"],
+        "discount_percent": order["discount_percent"],
+    }})
     order = await db.orders.find_one({"id": order["id"]}, {"_id": 0})
     await _broadcast_order_change(table_id)
     return order
@@ -318,8 +376,14 @@ async def remove_item(table_id: str, item_id: str, _: bool = Depends(require_aut
         await db.orders.delete_one({"id": order["id"]})
         await _broadcast_order_change(table_id)
         return None
-    total = compute_total(new_items)
-    await db.orders.update_one({"id": order["id"]}, {"$set": {"items": new_items, "total": total}})
+    order["items"] = new_items
+    await apply_current_totals(order)
+    await db.orders.update_one({"id": order["id"]}, {"$set": {
+        "items": order["items"],
+        "subtotal": order["subtotal"],
+        "total": order["total"],
+        "discount_percent": order["discount_percent"],
+    }})
     order = await db.orders.find_one({"id": order["id"]}, {"_id": 0})
     await _broadcast_order_change(table_id)
     return order
@@ -337,8 +401,14 @@ async def delete_item(table_id: str, item_id: str, _: bool = Depends(require_aut
         await db.orders.delete_one({"id": order["id"]})
         await _broadcast_order_change(table_id)
         return None
-    total = compute_total(new_items)
-    await db.orders.update_one({"id": order["id"]}, {"$set": {"items": new_items, "total": total}})
+    order["items"] = new_items
+    await apply_current_totals(order)
+    await db.orders.update_one({"id": order["id"]}, {"$set": {
+        "items": order["items"],
+        "subtotal": order["subtotal"],
+        "total": order["total"],
+        "discount_percent": order["discount_percent"],
+    }})
     order = await db.orders.find_one({"id": order["id"]}, {"_id": 0})
     await _broadcast_order_change(table_id)
     return order
@@ -349,10 +419,17 @@ async def pay_order(table_id: str, _: bool = Depends(require_auth)):
     order = await get_open_order(table_id)
     if not order:
         raise HTTPException(404, "Açık adisyon yok")
+    await apply_current_totals(order)
     paid_at = datetime.now(timezone.utc).isoformat()
     await db.orders.update_one(
         {"id": order["id"]},
-        {"$set": {"status": "paid", "paid_at": paid_at}},
+        {"$set": {
+            "status": "paid",
+            "paid_at": paid_at,
+            "subtotal": order["subtotal"],
+            "total": order["total"],
+            "discount_percent": order["discount_percent"],
+        }},
     )
     order["status"] = "paid"
     order["paid_at"] = paid_at
@@ -472,11 +549,17 @@ async def public_add(table_id: str, req: AddItemRequest):
         )
         order["items"].append(item.model_dump())
 
-    order["total"] = compute_total(order["items"])
+    await apply_current_totals(order)
     order["source"] = "qr"
     await db.orders.update_one(
         {"id": order["id"]},
-        {"$set": {"items": order["items"], "total": order["total"], "source": "qr"}},
+        {"$set": {
+            "items": order["items"],
+            "subtotal": order["subtotal"],
+            "total": order["total"],
+            "discount_percent": order["discount_percent"],
+            "source": "qr",
+        }},
     )
     await _broadcast_order_change(table_id)
     return {"ok": True, "total": order["total"]}

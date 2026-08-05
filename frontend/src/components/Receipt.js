@@ -9,6 +9,7 @@ export default function Receipt({ order, onDone }) {
   }, [onDone]);
 
   const dt = order.paid_at ? new Date(order.paid_at) : new Date();
+  const hasDiscount = (order.discount_percent || 0) > 0 && (order.subtotal || 0) > 0;
 
   return (
     <div id="receipt-print" className="hidden print:block">
@@ -41,7 +42,19 @@ export default function Receipt({ order, onDone }) {
         </tbody>
       </table>
       <div style={{ borderTop: "1px dashed #000", margin: "8px 0" }} />
-      <div style={{ display: "flex", justifyContent: "space-between", fontWeight: "bold", fontSize: 14 }}>
+      {hasDiscount && (
+        <>
+          <div style={{ display: "flex", justifyContent: "space-between", fontSize: 12 }}>
+            <span>Ara Toplam</span>
+            <span>{formatTL(order.subtotal)}</span>
+          </div>
+          <div style={{ display: "flex", justifyContent: "space-between", fontSize: 12 }}>
+            <span>Happy Hour (-%{order.discount_percent})</span>
+            <span>-{formatTL(order.subtotal - order.total)}</span>
+          </div>
+        </>
+      )}
+      <div style={{ display: "flex", justifyContent: "space-between", fontWeight: "bold", fontSize: 14, marginTop: 4 }}>
         <span>TOPLAM</span>
         <span>{formatTL(order.total)}</span>
       </div>

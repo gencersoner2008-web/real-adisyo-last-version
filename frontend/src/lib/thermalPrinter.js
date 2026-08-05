@@ -120,6 +120,15 @@ export const buildReceipt = (order) => {
 
   parts.push(line(dashes()));
 
+  // Discount block (if any)
+  const hasDiscount = (order.discount_percent || 0) > 0 && (order.subtotal || 0) > 0;
+  if (hasDiscount) {
+    const discount = (order.subtotal || 0) - (order.total || 0);
+    parts.push(line(padRight("Ara Toplam", 22) + padLeft(fmtTL(order.subtotal), 20)));
+    parts.push(line(padRight("Happy Hour (-%" + order.discount_percent + ")", 22) + padLeft("-" + fmtTL(discount), 20)));
+    parts.push(line(dashes()));
+  }
+
   // Total
   parts.push(CMD.bold(true), CMD.size(0, 1));
   parts.push(line(padRight("TOPLAM", 22) + padLeft(fmtTL(order.total), 20)));
