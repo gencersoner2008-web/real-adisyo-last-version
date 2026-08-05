@@ -1,4 +1,4 @@
-import { useEffect } from "react";
+import { useEffect, Fragment } from "react";
 import { formatTL, sizeLabel } from "@/lib/api";
 
 export default function Receipt({ order, onDone }) {
@@ -30,14 +30,23 @@ export default function Receipt({ order, onDone }) {
         </thead>
         <tbody>
           {order.items.map((it) => (
-            <tr key={it.id}>
-              <td style={{ textAlign: "left" }}>
-                {it.name}
-                {it.size ? ` (${sizeLabel(it.size)})` : ""}
-              </td>
-              <td style={{ textAlign: "center" }}>{it.qty}</td>
-              <td style={{ textAlign: "right" }}>{formatTL(it.unit_price * it.qty)}</td>
-            </tr>
+            <Fragment key={it.id}>
+              <tr>
+                <td style={{ textAlign: "left" }}>
+                  {it.name}
+                  {it.size ? ` (${sizeLabel(it.size)})` : ""}
+                </td>
+                <td style={{ textAlign: "center" }}>{it.qty}</td>
+                <td style={{ textAlign: "right" }}>{formatTL(it.unit_price * it.qty)}</td>
+              </tr>
+              {(it.extras || []).map((ex) => (
+                <tr key={it.id + "-" + ex.id}>
+                  <td style={{ textAlign: "left", paddingLeft: 10, fontSize: 11, color: "#333" }} colSpan={3}>
+                    + {ex.name} (+{formatTL(ex.price)})
+                  </td>
+                </tr>
+              ))}
+            </Fragment>
           ))}
         </tbody>
       </table>

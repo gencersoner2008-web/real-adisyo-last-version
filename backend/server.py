@@ -49,6 +49,16 @@ class Product(ProductCreate):
     created_at: str = Field(default_factory=lambda: datetime.now(timezone.utc).isoformat())
 
 
+class ExtraCreate(BaseModel):
+    name: str
+    price: float
+
+
+class Extra(ExtraCreate):
+    id: str = Field(default_factory=lambda: str(uuid.uuid4()))
+    created_at: str = Field(default_factory=lambda: datetime.now(timezone.utc).isoformat())
+
+
 class TableCreate(BaseModel):
     name: str
 
@@ -71,6 +81,7 @@ class OrderItem(BaseModel):
     size: Optional[str] = None  # tall/grande/venti/standard
     unit_price: float
     qty: int = 1
+    extras: List[dict] = Field(default_factory=list)  # snapshot: [{id,name,price}]
 
     @property
     def total(self) -> float:
@@ -81,6 +92,7 @@ class AddItemRequest(BaseModel):
     product_id: str
     size: Optional[str] = None  # required for hot
     qty: int = 1
+    extra_ids: List[str] = Field(default_factory=list)
 
 
 class Order(BaseModel):
@@ -259,6 +271,55 @@ async def delete_product(product_id: str, _: bool = Depends(require_auth)):
     return {"ok": True}
 
 
+# --------- Extras (Ekstralar) ---------
+async def _snapshot_extras(extra_ids: List[str]) -> List[dict]:
+    if not extra_ids:
+        return []
+    found = await db.extras.find({"id": {"$in": extra_ids}}, {"_id": 0}).to_list(100)
+    by_id = {e["id"]: e for e in found}
+    result = []
+    for eid in extra_ids:
+        if eid in by_id:
+            e = by_id[eid]
+            result.append({"id": e["id"], "name": e["name"], "price": float(e["price"])})
+    return result
+
+
+def _extras_sig(extras_list: List[dict]) -> tuple:
+    return tuple(sorted([e["id"] for e in (extras_list or [])]))
+
+
+@api_router.get("/extras", response_model=List[Extra])
+async def list_extras(_: bool = Depends(require_auth)):
+    docs = await db.extras.find({}, {"_id": 0}).sort("created_at", 1).to_list(1000)
+    return docs
+
+
+@api_router.post("/extras", response_model=Extra)
+async def create_extra(e: ExtraCreate, _: bool = Depends(require_auth)):
+    ex = Extra(**e.model_dump())
+    await db.extras.insert_one(ex.model_dump())
+    return ex
+
+
+@api_router.put("/extras/{extra_id}", response_model=Extra)
+async def update_extra(extra_id: str, e: ExtraCreate, _: bool = Depends(require_auth)):
+    existing = await db.extras.find_one({"id": extra_id}, {"_id": 0})
+    if not existing:
+        raise HTTPException(404, "Ekstra bulunamadı")
+    await db.extras.update_one({"id": extra_id}, {"$set": e.model_dump()})
+    doc = await db.extras.find_one({"id": extra_id}, {"_id": 0})
+    return doc
+
+
+@api_router.delete("/extras/{extra_id}")
+async def delete_extra(extra_id: str, _: bool = Depends(require_auth)):
+    res = await db.extras.delete_one({"id": extra_id})
+    if res.deleted_count == 0:
+        raise HTTPException(404, "Ekstra bulunamadı")
+    return {"ok": True}
+
+
 # --------- Tables ---------
 @api_router.get("/tables")
 async def list_tables(_: bool = Depends(require_auth)):
@@ -337,16 +398,27 @@ async def add_item(table_id: str, req: AddItemRequest, _: bool = Depends(require
         unit_price = product["price"]
         size_label = "standart" if product["category"] == "cold" else None
 
+    # Extras only allowed for hot drinks; snapshot & add to unit_price
+    extras_snap = []
+    if req.extra_ids and product["category"] == "hot":
+        extras_snap = await _snapshot_extras(req.extra_ids)
+        unit_price = round(unit_price + sum(e["price"] for e in extras_snap), 2)
+    sig = _extras_sig(extras_snap)
+
     order = await get_open_order(table_id)
     if not order:
         order_obj = Order(table_id=table_id, table_name=table["name"])
         order = order_obj.model_dump()
         await db.orders.insert_one(order)
 
-    # Merge with existing same product+size
+    # Merge with existing same product+size+extras signature
     merged = False
     for it in order["items"]:
-        if it["product_id"] == req.product_id and it.get("size") == size_label:
+        if (
+            it["product_id"] == req.product_id
+            and it.get("size") == size_label
+            and _extras_sig(it.get("extras", [])) == sig
+        ):
             it["qty"] += req.qty
             merged = True
             break
@@ -357,6 +429,7 @@ async def add_item(table_id: str, req: AddItemRequest, _: bool = Depends(require
             size=size_label,
             unit_price=unit_price,
             qty=req.qty,
+            extras=extras_snap,
         )
         order["items"].append(item.model_dump())
 
@@ -520,6 +593,12 @@ async def public_menu():
     return docs
 
 
+@api_router.get("/public/extras")
+async def public_extras():
+    docs = await db.extras.find({}, {"_id": 0}).sort("created_at", 1).to_list(200)
+    return docs
+
+
 @api_router.get("/public/table/{table_id}")
 async def public_table(table_id: str):
     t = await db.tables.find_one({"id": table_id}, {"_id": 0})
@@ -546,6 +625,12 @@ async def public_add(table_id: str, req: AddItemRequest):
         unit_price = product["price"]
         size_label = "standart" if product["category"] == "cold" else None
 
+    extras_snap = []
+    if req.extra_ids and product["category"] == "hot":
+        extras_snap = await _snapshot_extras(req.extra_ids)
+        unit_price = round(unit_price + sum(e["price"] for e in extras_snap), 2)
+    sig = _extras_sig(extras_snap)
+
     order = await get_open_order(table_id)
     if not order:
         order_obj = Order(table_id=table_id, table_name=table["name"], source="qr")
@@ -554,7 +639,11 @@ async def public_add(table_id: str, req: AddItemRequest):
 
     merged = False
     for it in order["items"]:
-        if it["product_id"] == req.product_id and it.get("size") == size_label:
+        if (
+            it["product_id"] == req.product_id
+            and it.get("size") == size_label
+            and _extras_sig(it.get("extras", [])) == sig
+        ):
             it["qty"] += req.qty
             merged = True
             break
@@ -565,6 +654,7 @@ async def public_add(table_id: str, req: AddItemRequest):
             size=size_label,
             unit_price=unit_price,
             qty=req.qty,
+            extras=extras_snap,
         )
         order["items"].append(item.model_dump())
 
@@ -685,6 +775,21 @@ async def seed(_: bool = Depends(require_auth)):
         for i in range(1, 9):
             tbl = Table(name=f"Masa {i}")
             await db.tables.insert_one(tbl.model_dump())
+    e_count = await db.extras.count_documents({})
+    if e_count == 0:
+        seed_extras = [
+            {"name": "Ekstra Süt", "price": 10},
+            {"name": "Ekstra Shot", "price": 15},
+            {"name": "Vanilya Şurubu", "price": 8},
+            {"name": "Beyaz Çikolata Şurubu", "price": 8},
+            {"name": "Karamel Şurubu", "price": 8},
+            {"name": "Fındık Şurubu", "price": 8},
+            {"name": "Toffee Şurubu", "price": 10},
+            {"name": "Bitter Çikolata Şurubu", "price": 8},
+        ]
+        for se in seed_extras:
+            ex = Extra(**se)
+            await db.extras.insert_one(ex.model_dump())
     return {"ok": True}
 
 

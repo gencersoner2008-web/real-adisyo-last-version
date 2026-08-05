@@ -10,6 +10,7 @@ import { toast } from "sonner";
 import { ArrowLeft, Flame, Snowflake, Cookie, Plus, Minus, Trash2, Printer, QrCode, StickyNote } from "lucide-react";
 import Receipt from "@/components/Receipt";
 import PrinterButton from "@/components/PrinterButton";
+import HotDrinkPicker from "@/components/HotDrinkPicker";
 import { usePrinter } from "@/context/PrinterContext";
 import { playChime } from "@/lib/chime";
 import { Popover, PopoverTrigger, PopoverContent } from "@/components/ui/popover";
@@ -26,6 +27,7 @@ export default function OrderPage() {
   const navigate = useNavigate();
   const printer = usePrinter();
   const [products, setProducts] = useState([]);
+  const [extras, setExtras] = useState([]);
   const [order, setOrder] = useState(null);
   const [table, setTable] = useState(null);
   const [sizePicker, setSizePicker] = useState(null); // product being sized
@@ -52,14 +54,16 @@ export default function OrderPage() {
   const clearNote = async () => { setNoteDraft(""); };
 
   const load = async () => {
-    const [p, o, tl] = await Promise.all([
+    const [p, o, tl, ex] = await Promise.all([
       api.get("/products"),
       api.get(`/orders/table/${tableId}`),
       api.get("/tables"),
+      api.get("/extras"),
     ]);
     setProducts(p.data);
     setOrder(o.data || null);
     setTable(tl.data.find((x) => x.id === tableId) || null);
+    setExtras(ex.data);
   };
 
   useEffect(() => { load(); }, [tableId]);
@@ -102,15 +106,17 @@ export default function OrderPage() {
     return g;
   }, [products]);
 
-  const addItem = async (product, size = null) => {
+  const addItem = async (product, size = null, extra_ids = []) => {
     try {
       const { data } = await api.post(`/orders/table/${tableId}/add`, {
         product_id: product.id,
         size,
         qty: 1,
+        extra_ids,
       });
       setOrder(data);
-      toast.success(`${product.name}${size ? " • " + sizeLabel(size) : ""} eklendi`);
+      const suffix = extra_ids.length > 0 ? ` +${extra_ids.length} ekstra` : "";
+      toast.success(`${product.name}${size ? " • " + sizeLabel(size) : ""}${suffix} eklendi`);
     } catch (e) {
       toast.error(e?.response?.data?.detail || "Eklenemedi");
     }
@@ -298,6 +304,16 @@ export default function OrderPage() {
                     <p className="text-xs text-[#6B5D54]">
                       {it.size ? sizeLabel(it.size) + " • " : ""}{formatTL(it.unit_price)}
                     </p>
+                    {(it.extras || []).length > 0 && (
+                      <ul className="mt-1 space-y-0.5">
+                        {(it.extras || []).map((ex) => (
+                          <li key={ex.id} className="text-[11px] text-[#8A5A2B] flex items-center gap-1">
+                            <span className="inline-block w-1 h-1 rounded-full bg-[#C8664D]" />
+                            {ex.name} <span className="text-[#6B5D54]">(+{formatTL(ex.price)})</span>
+                          </li>
+                        ))}
+                      </ul>
+                    )}
                     <div className="mt-2 inline-flex items-center gap-2 bg-[#F9F6F0] rounded-full px-1 py-1">
                       <button data-testid={`cart-dec-${it.id}`} onClick={() => removeOne(it.id)} className="w-7 h-7 rounded-full bg-white border border-[#E6DDD1] hover:bg-[#F2EBE1] flex items-center justify-center">
                         <Minus className="w-3 h-3" />
@@ -351,34 +367,14 @@ export default function OrderPage() {
         </div>
       </aside>
 
-      {/* Size picker for hot drinks */}
-      <Dialog open={!!sizePicker} onOpenChange={(o) => !o && setSizePicker(null)}>
-        <DialogContent className="max-w-md rounded-2xl">
-          <DialogHeader>
-            <DialogTitle className="font-display text-2xl">{sizePicker?.name} • Boy seçin</DialogTitle>
-          </DialogHeader>
-          <div className="grid grid-cols-3 gap-3 mt-4">
-            {["tall", "grande", "venti"].map((s) => (
-              <button
-                key={s}
-                data-testid={`size-${s}`}
-                onClick={async () => {
-                  const prod = sizePicker;
-                  setSizePicker(null);
-                  await addItem(prod, s);
-                }}
-                className="rounded-xl border border-[#E6DDD1] p-4 hover:border-[#C8664D] hover:bg-[#F9F6F0] transition-colors text-center"
-              >
-                <p className="font-display font-semibold capitalize">{sizeLabel(s)}</p>
-                <p className="text-[#C8664D] font-bold mt-1">{formatTL(sizePicker?.[`price_${s}`])}</p>
-              </button>
-            ))}
-          </div>
-          <DialogFooter>
-            <Button variant="ghost" onClick={() => setSizePicker(null)}>İptal</Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
+      {/* Size + extras picker for hot drinks */}
+      <HotDrinkPicker
+        product={sizePicker}
+        extras={extras}
+        open={!!sizePicker}
+        onOpenChange={(o) => !o && setSizePicker(null)}
+        onSubmit={(size, extra_ids) => addItem(sizePicker, size, extra_ids)}
+      />
 
       {receiptData && <Receipt order={receiptData} onDone={() => setReceiptData(null)} />}
     </div>

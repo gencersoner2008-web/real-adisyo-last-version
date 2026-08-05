@@ -1,15 +1,12 @@
 import { useEffect, useMemo, useState } from "react";
 import { useParams } from "react-router-dom";
 import axios from "axios";
-import { formatTL, sizeLabel } from "@/lib/api";
+import { formatTL } from "@/lib/api";
 import { Coffee, Flame, Snowflake, Cookie, Check } from "lucide-react";
-import { Button } from "@/components/ui/button";
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
-import {
-  Dialog, DialogContent, DialogHeader, DialogTitle,
-} from "@/components/ui/dialog";
 import { toast } from "sonner";
 import { Toaster } from "@/components/ui/sonner";
+import HotDrinkPicker from "@/components/HotDrinkPicker";
 
 const BACKEND_URL = process.env.REACT_APP_BACKEND_URL;
 const API = `${BACKEND_URL}/api`;
@@ -24,6 +21,7 @@ export default function QrOrderPage() {
   const { tableId } = useParams();
   const [table, setTable] = useState(null);
   const [products, setProducts] = useState([]);
+  const [extras, setExtras] = useState([]);
   const [category, setCategory] = useState("hot");
   const [sizePicker, setSizePicker] = useState(null);
   const [placed, setPlaced] = useState([]);
@@ -31,12 +29,14 @@ export default function QrOrderPage() {
   useEffect(() => {
     (async () => {
       try {
-        const [tRes, mRes] = await Promise.all([
+        const [tRes, mRes, eRes] = await Promise.all([
           axios.get(`${API}/public/table/${tableId}`),
           axios.get(`${API}/public/menu`),
+          axios.get(`${API}/public/extras`),
         ]);
         setTable(tRes.data);
         setProducts(mRes.data);
+        setExtras(eRes.data);
       } catch (e) {
         toast.error("Masa bulunamadı");
       }
@@ -49,14 +49,18 @@ export default function QrOrderPage() {
     return g;
   }, [products]);
 
-  const send = async (product, size = null) => {
+  const send = async (product, size = null, extra_ids = []) => {
     try {
       await axios.post(`${API}/public/orders/table/${tableId}/add`, {
-        product_id: product.id, size, qty: 1,
+        product_id: product.id, size, qty: 1, extra_ids,
       });
-      const label = `${product.name}${size ? " • " + sizeLabel(size) : ""}`;
+      const sizeStr = size ? " • " + (size === "tall" ? "Tall" : size === "grande" ? "Grande" : size === "venti" ? "Venti" : size) : "";
+      const extrasStr = extra_ids.length > 0
+        ? " + " + extra_ids.map((id) => extras.find((e) => e.id === id)?.name).filter(Boolean).join(", ")
+        : "";
+      const label = `${product.name}${sizeStr}${extrasStr}`;
       setPlaced((prev) => [{ id: Date.now(), label }, ...prev].slice(0, 20));
-      toast.success(`${label} garsona iletildi`);
+      toast.success(`Sipariş garsona iletildi`);
     } catch (e) {
       toast.error("Sipariş gönderilemedi");
     }
@@ -80,7 +84,7 @@ export default function QrOrderPage() {
         <div>
           <p className="text-xs uppercase tracking-[0.24em] text-[#6B5D54]">Menü</p>
           <h1 className="font-display text-2xl font-bold mt-1">Sipariş vermek için ürün seçin</h1>
-          <p className="text-sm text-[#6B5D54] mt-1">Seçtiğiniz ürünler direkt garson ekranına düşecek.</p>
+          <p className="text-sm text-[#6B5D54] mt-1">Sıcak içeceklere şurup, ekstra süt gibi ekstralar ekleyebilirsiniz.</p>
         </div>
 
         <Tabs value={category} onValueChange={setCategory}>
@@ -97,6 +101,7 @@ export default function QrOrderPage() {
               {grouped[k].map((p) => (
                 <button
                   key={p.id}
+                  data-testid={`qr-product-${p.id}`}
                   onClick={() => (p.category === "hot" ? setSizePicker(p) : send(p))}
                   className="text-left rounded-2xl bg-white border border-[#E6DDD1] p-4 hover:border-[#C8664D] transition-colors card-shadow"
                 >
@@ -119,8 +124,8 @@ export default function QrOrderPage() {
             <p className="text-xs uppercase tracking-[0.24em] text-[#6B5D54]">Bu masada gönderdikleriniz</p>
             <ul className="mt-3 space-y-2">
               {placed.map((x) => (
-                <li key={x.id} className="flex items-center gap-2 text-sm text-[#2C1F16]">
-                  <Check className="w-4 h-4 text-[#768962]" /> {x.label}
+                <li key={x.id} className="flex items-start gap-2 text-sm text-[#2C1F16]">
+                  <Check className="w-4 h-4 text-[#768962] mt-0.5 shrink-0" /> {x.label}
                 </li>
               ))}
             </ul>
@@ -128,19 +133,13 @@ export default function QrOrderPage() {
         )}
       </main>
 
-      <Dialog open={!!sizePicker} onOpenChange={(o) => !o && setSizePicker(null)}>
-        <DialogContent className="max-w-md rounded-2xl">
-          <DialogHeader><DialogTitle className="font-display">{sizePicker?.name} • Boy seçin</DialogTitle></DialogHeader>
-          <div className="grid grid-cols-3 gap-3 mt-3">
-            {["tall", "grande", "venti"].map((s) => (
-              <button key={s} onClick={async () => { const p = sizePicker; setSizePicker(null); await send(p, s); }} className="rounded-xl border border-[#E6DDD1] p-4 hover:border-[#C8664D] transition-colors text-center">
-                <p className="font-display capitalize font-semibold">{sizeLabel(s)}</p>
-                <p className="text-[#C8664D] font-bold mt-1">{formatTL(sizePicker?.[`price_${s}`])}</p>
-              </button>
-            ))}
-          </div>
-        </DialogContent>
-      </Dialog>
+      <HotDrinkPicker
+        product={sizePicker}
+        extras={extras}
+        open={!!sizePicker}
+        onOpenChange={(o) => !o && setSizePicker(null)}
+        onSubmit={(size, extra_ids) => send(sizePicker, size, extra_ids)}
+      />
       <Toaster richColors position="top-center" />
     </div>
   );

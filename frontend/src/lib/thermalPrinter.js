@@ -116,6 +116,9 @@ export const buildReceipt = (order) => {
       }
     }
     parts.push(line("  " + fmtTL(it.unit_price) + " x " + it.qty));
+    for (const ex of it.extras || []) {
+      parts.push(line("  + " + ex.name + " (+" + fmtTL(ex.price) + ")"));
+    }
   }
 
   parts.push(line(dashes()));
