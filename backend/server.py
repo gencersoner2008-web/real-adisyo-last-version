@@ -42,6 +42,8 @@ class ProductCreate(BaseModel):
     price_grande: Optional[float] = None
     price_venti: Optional[float] = None
     price: Optional[float] = None  # for cold & other
+    # None (missing) = all extras allowed; [] = none; [ids] = restrict to these
+    allowed_extra_ids: Optional[List[str]] = None
 
 
 class Product(ProductCreate):
@@ -401,7 +403,9 @@ async def add_item(table_id: str, req: AddItemRequest, _: bool = Depends(require
     # Extras only allowed for hot drinks; snapshot & add to unit_price
     extras_snap = []
     if req.extra_ids and product["category"] == "hot":
-        extras_snap = await _snapshot_extras(req.extra_ids)
+        allowed = product.get("allowed_extra_ids")
+        eff_ids = req.extra_ids if allowed is None else [i for i in req.extra_ids if i in allowed]
+        extras_snap = await _snapshot_extras(eff_ids)
         unit_price = round(unit_price + sum(e["price"] for e in extras_snap), 2)
     sig = _extras_sig(extras_snap)
 
@@ -627,7 +631,9 @@ async def public_add(table_id: str, req: AddItemRequest):
 
     extras_snap = []
     if req.extra_ids and product["category"] == "hot":
-        extras_snap = await _snapshot_extras(req.extra_ids)
+        allowed = product.get("allowed_extra_ids")
+        eff_ids = req.extra_ids if allowed is None else [i for i in req.extra_ids if i in allowed]
+        extras_snap = await _snapshot_extras(eff_ids)
         unit_price = round(unit_price + sum(e["price"] for e in extras_snap), 2)
     sig = _extras_sig(extras_snap)
 

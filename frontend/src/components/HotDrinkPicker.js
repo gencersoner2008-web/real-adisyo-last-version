@@ -14,6 +14,14 @@ export default function HotDrinkPicker({ product, extras = [], open, onOpenChang
   const [selectedExtras, setSelectedExtras] = useState([]);
   const [busy, setBusy] = useState(false);
 
+  // Restrict extras per product: null/undefined means all allowed, array means whitelist.
+  const shownExtras = useMemo(() => {
+    const allowed = product?.allowed_extra_ids;
+    if (!Array.isArray(allowed)) return extras;
+    const set = new Set(allowed);
+    return extras.filter((e) => set.has(e.id));
+  }, [extras, product]);
+
   useEffect(() => {
     if (open) {
       setSize("grande");
@@ -74,11 +82,11 @@ export default function HotDrinkPicker({ product, extras = [], open, onOpenChang
             </div>
           </div>
 
-          {extras.length > 0 && (
+          {shownExtras.length > 0 && (
             <div>
               <p className="text-xs uppercase tracking-[0.24em] text-[#6B5D54] mb-3">Ekstralar (opsiyonel)</p>
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
-                {extras.map((e) => {
+                {shownExtras.map((e) => {
                   const active = selectedExtras.includes(e.id);
                   return (
                     <label

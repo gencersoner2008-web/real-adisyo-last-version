@@ -11,10 +11,13 @@ import {
 } from "@/components/ui/dialog";
 import { Plus, Pencil, Trash2, Sparkles } from "lucide-react";
 import { toast } from "sonner";
+import { Switch } from "@/components/ui/switch";
+import { Checkbox } from "@/components/ui/checkbox";
 
 const emptyForm = {
   name: "", category: "hot",
   price_tall: "", price_grande: "", price_venti: "", price: "",
+  allowed_extra_ids: null, // null = all allowed; array = whitelist
 };
 
 const emptyExtraForm = { name: "", price: "" };
@@ -47,6 +50,7 @@ export default function ProductsPage() {
       price_grande: p.price_grande ?? "",
       price_venti: p.price_venti ?? "",
       price: p.price ?? "",
+      allowed_extra_ids: Array.isArray(p.allowed_extra_ids) ? p.allowed_extra_ids : null,
     });
     setOpen(true);
   };
@@ -58,6 +62,7 @@ export default function ProductsPage() {
         payload.price_tall = parseFloat(form.price_tall);
         payload.price_grande = parseFloat(form.price_grande);
         payload.price_venti = parseFloat(form.price_venti);
+        payload.allowed_extra_ids = Array.isArray(form.allowed_extra_ids) ? form.allowed_extra_ids : null;
       } else {
         payload.price = parseFloat(form.price);
       }
@@ -157,11 +162,62 @@ export default function ProductsPage() {
               </Select>
             </div>
             {form.category === "hot" ? (
-              <div className="grid grid-cols-3 gap-3">
-                <div><Label>Tall (₺)</Label><Input data-testid="price-tall" type="number" value={form.price_tall} onChange={(e) => setForm({ ...form, price_tall: e.target.value })} /></div>
-                <div><Label>Grande (₺)</Label><Input data-testid="price-grande" type="number" value={form.price_grande} onChange={(e) => setForm({ ...form, price_grande: e.target.value })} /></div>
-                <div><Label>Venti (₺)</Label><Input data-testid="price-venti" type="number" value={form.price_venti} onChange={(e) => setForm({ ...form, price_venti: e.target.value })} /></div>
-              </div>
+              <>
+                <div className="grid grid-cols-3 gap-3">
+                  <div><Label>Tall (₺)</Label><Input data-testid="price-tall" type="number" value={form.price_tall} onChange={(e) => setForm({ ...form, price_tall: e.target.value })} /></div>
+                  <div><Label>Grande (₺)</Label><Input data-testid="price-grande" type="number" value={form.price_grande} onChange={(e) => setForm({ ...form, price_grande: e.target.value })} /></div>
+                  <div><Label>Venti (₺)</Label><Input data-testid="price-venti" type="number" value={form.price_venti} onChange={(e) => setForm({ ...form, price_venti: e.target.value })} /></div>
+                </div>
+                <div className="rounded-xl border border-[#E6DDD1] bg-[#F9F6F0] p-3 space-y-3">
+                  <div className="flex items-center justify-between">
+                    <div>
+                      <p className="text-sm font-medium text-[#2C1F16]">Bu üründe tüm ekstralar açık</p>
+                      <p className="text-[11px] text-[#6B5D54]">Kapatırsanız yalnızca seçtiğiniz ekstralar sunulur (örn. Espresso için sadece Ekstra Shot).</p>
+                    </div>
+                    <Switch
+                      data-testid="allow-all-extras-switch"
+                      checked={form.allowed_extra_ids === null}
+                      onCheckedChange={(v) => setForm({ ...form, allowed_extra_ids: v ? null : [] })}
+                    />
+                  </div>
+                  {Array.isArray(form.allowed_extra_ids) && (
+                    extras.length === 0 ? (
+                      <p className="text-xs text-[#6B5D54]">Önce Ekstralar bölümünden ekleyin.</p>
+                    ) : (
+                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-1.5">
+                        {extras.map((ex) => {
+                          const active = form.allowed_extra_ids.includes(ex.id);
+                          return (
+                            <label
+                              key={ex.id}
+                              data-testid={`product-allow-extra-${ex.id}`}
+                              className={`flex items-center justify-between gap-2 rounded-lg border bg-white px-2.5 py-2 cursor-pointer transition-colors ${
+                                active ? "border-[#C8664D]" : "border-[#E6DDD1] hover:border-[#C8664D]/40"
+                              }`}
+                            >
+                              <div className="flex items-center gap-2 min-w-0">
+                                <Checkbox
+                                  checked={active}
+                                  onCheckedChange={() => {
+                                    setForm((f) => {
+                                      const set = new Set(f.allowed_extra_ids || []);
+                                      if (set.has(ex.id)) set.delete(ex.id); else set.add(ex.id);
+                                      return { ...f, allowed_extra_ids: Array.from(set) };
+                                    });
+                                  }}
+                                  className="border-[#C8664D] data-[state=checked]:bg-[#C8664D] data-[state=checked]:border-[#C8664D]"
+                                />
+                                <span className="text-xs font-medium text-[#2C1F16] truncate">{ex.name}</span>
+                              </div>
+                              <span className="text-[11px] text-[#6B5D54] whitespace-nowrap">+{formatTL(ex.price)}</span>
+                            </label>
+                          );
+                        })}
+                      </div>
+                    )
+                  )}
+                </div>
+              </>
             ) : (
               <div>
                 <Label>Fiyat (₺)</Label>
