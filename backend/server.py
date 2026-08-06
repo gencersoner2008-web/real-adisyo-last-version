@@ -189,9 +189,22 @@ async def get_open_order(table_id: str) -> Optional[dict]:
 
 
 # --------- Auth Route ---------
+async def _current_password() -> str:
+    doc = await db.settings.find_one({"_id": "app"}, {"_id": 0}) or {}
+    if doc.get("app_password"):
+        return str(doc["app_password"])
+    return APP_PASSWORD
+
+
+class ChangePasswordRequest(BaseModel):
+    current_password: str
+    new_password: str
+
+
 @api_router.post("/auth/login")
 async def login(req: LoginRequest):
-    if req.password != APP_PASSWORD:
+    current = await _current_password()
+    if req.password != current:
         raise HTTPException(status_code=401, detail="Şifre hatalı")
     return {"token": SESSION_TOKEN}
 
@@ -199,6 +212,33 @@ async def login(req: LoginRequest):
 @api_router.get("/auth/verify")
 async def verify(_: bool = Depends(require_auth)):
     return {"ok": True}
+
+
+@api_router.put("/auth/password")
+async def change_password(req: ChangePasswordRequest, _: bool = Depends(require_auth)):
+    current = await _current_password()
+    if req.current_password != current:
+        raise HTTPException(status_code=401, detail="Mevcut şifre hatalı")
+    new_pw = (req.new_password or "").strip()
+    if len(new_pw) < 4:
+        raise HTTPException(status_code=400, detail="Yeni şifre en az 4 karakter olmalı")
+    await db.settings.update_one(
+        {"_id": "app"},
+        {"$set": {"app_password": new_pw}},
+        upsert=True,
+    )
+    return {"ok": True}
+
+
+@api_router.post("/auth/reset-password")
+async def reset_password(_: bool = Depends(require_auth)):
+    """Reset password to env default (1234). Requires being logged in."""
+    await db.settings.update_one(
+        {"_id": "app"},
+        {"$unset": {"app_password": ""}},
+        upsert=True,
+    )
+    return {"ok": True, "password": APP_PASSWORD}
 
 
 # --------- Settings (Happy Hour) ---------

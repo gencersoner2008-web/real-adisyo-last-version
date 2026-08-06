@@ -1,0 +1,32 @@
+{
+  "summary": "Focused test of auth/password bug + new change-password & reset-to-default flows for REAL COFFEE ADİSYON. Backend: 8/8 pytest cases passed (login default OK, wrong pw 401, change-pw success+persists, wrong current 401, too-short 400, missing auth 401 on both PUT /auth/password and POST /auth/reset-password, reset restores 1234). Frontend Playwright: all 7 UI steps passed - login with 1234, wrong pw toast 'Şifre hatalı', change pw 1234->kahve99 with 'Şifre güncellendi' toast, logout, old-pw rejection, login kahve99, reset via 'Varsayılana Sıfırla' (window.confirm auto-accepted) with 'Şifre 1234 olarak sıfırlandı' toast, and final login with 1234 succeeded. User's original bug (default 1234 doesn't work) could NOT be reproduced - default password works both via API and UI end-to-end.",
+  "backend_issues": {"critical": [], "minor": []},
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": [
+      {"screen": "AppShell header (Masalar page)", "issues": ["At viewport width ~1280px, right-anchored sonner toasts (e.g., 'QR sipariş geldi', 'Hoş geldiniz') overlap the header icons (password-change key icon, mute-toggle, logout) making them unclickable via real cursor for ~4s. Consider moving toaster to bottom-right or reducing width so the header remains usable. This did not affect wider viewports."]}
+    ]
+  },
+  "test_report_links": ["/app/backend/tests/test_auth_password.py", "/app/test_reports/pytest/pytest_auth.xml"],
+  "action_items": [
+    "USER-REPORTED BUG 'şifrem çalışmıyor' cannot be reproduced. Default 1234 works via backend and via UI. Consider: (a) user may have previously changed the password and forgotten it - guide them to Varsayılana Sıfırla via key icon (requires being logged in first, chicken/egg if they can't get in); (b) offer an unauthenticated reset mechanism (e.g., server env override) or docs. Currently POST /api/auth/reset-password requires auth, which is unreachable if user forgot password.",
+    "Consider auto-dismissing or repositioning sonner toasts so they don't overlap header controls at ~1280px."
+  ],
+  "critical_code_review_comments": [
+    "POST /api/auth/reset-password requires being authenticated - if the user genuinely forgets the password there is no recovery path from the UI. Consider an env-driven 'break-glass' reset (e.g., a CLI script or an unauthenticated endpoint gated by a shared secret from APP_PASSWORD env).",
+    "SESSION_TOKEN is a static hardcoded string 'real-coffee-session-token' - anyone who reads the frontend bundle or intercepts one login can forge auth indefinitely (no expiry, no rotation on password change). After password change, existing sessions remain valid because the token is not invalidated. Consider rotating the token per login or storing per-session tokens in DB.",
+    "server.py is 900+ lines; recommend splitting into routers (auth.py, products.py, orders.py, reports.py, sse.py) for maintainability.",
+    "Passwords are stored in db.settings.app_password as plaintext. Consider hashing (bcrypt/argon2) even for single-user MVP.",
+    "Change-password success does not force re-login; the previously issued static token continues to work with the new password. Acceptable for MVP but worth noting.",
+    "Minor: AuthContext.login catches seed error silently which is fine, but change-password success should perhaps clear localStorage rc_token & redirect to /login for a cleaner UX."
+  ],
+  "updated_files": ["/app/backend/tests/test_auth_password.py (new)"],
+  "success_rate": {"backend": "100% (8/8)", "frontend": "100% (7/7)"},
+  "test_credentials": "Password 1234 (restored to default after all tests via POST /api/auth/reset-password)",
+  "seed_data_creation": "None. Fixtures reset password to default before/after each backend test.",
+  "retest_needed": false,
+  "main_agent_can_self_test": true,
+  "context_for_next_testing_agent": "Auth/password flows are healthy. If retesting, ensure DB is left with default password by calling POST /api/auth/reset-password with a valid bearer token before finishing. When testing UI at 1280x900, use JS click (page.evaluate) on header icons to bypass sonner toast overlay OR use viewport >=1920.",
+  "rca_of_the_issue": "User complaint 'şifrem çalışmıyor' with default password 1234: could not reproduce. Backend /api/auth/login returns 200 for {password:'1234'} and UI login navigates to '/' and shows 'Hoş geldiniz' toast. Likely causes for the user: (1) they previously changed the password via the newly added key icon and forgot the new one; (2) they typed a trailing space or used a different keyboard layout; (3) they were on a stale cached page pointing to a different backend. Mitigation implemented by main agent: PUT /api/auth/password + POST /api/auth/reset-password + UI dialog. Recommendation: expose an offline/env-based reset since /reset-password requires being logged in."
+}
