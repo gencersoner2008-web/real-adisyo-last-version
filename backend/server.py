@@ -848,6 +848,63 @@ async def delete_paid_orders_period(period: str = "daily", _: bool = Depends(req
     return {"deleted": res.deleted_count}
 
 
+@api_router.get("/reports/timeseries")
+async def reports_timeseries(period: str = "weekly", _: bool = Depends(require_auth)):
+    """Return a time-bucketed sales series.
+    period=weekly -> last 7 days, one bucket per day.
+    period=monthly -> last 12 months, one bucket per month.
+    """
+    now = datetime.now(timezone.utc)
+    buckets = []
+    if period == "monthly":
+        y, m = now.year, now.month
+        for i in range(11, -1, -1):
+            mm = m - i
+            yy = y
+            while mm <= 0:
+                mm += 12
+                yy -= 1
+            start = datetime(yy, mm, 1, tzinfo=timezone.utc)
+            end = datetime(yy + 1, 1, 1, tzinfo=timezone.utc) if mm == 12 else datetime(yy, mm + 1, 1, tzinfo=timezone.utc)
+            buckets.append({
+                "start": start.isoformat(),
+                "end": end.isoformat(),
+                "label": f"{start.strftime('%b')} {yy % 100:02d}",
+                "date": start.date().isoformat(),
+            })
+    else:
+        today_start = now.replace(hour=0, minute=0, second=0, microsecond=0)
+        tr_days = ["Pzt", "Sal", "Çar", "Per", "Cum", "Cmt", "Paz"]
+        for i in range(6, -1, -1):
+            start = today_start - timedelta(days=i)
+            end = start + timedelta(days=1)
+            buckets.append({
+                "start": start.isoformat(),
+                "end": end.isoformat(),
+                "label": tr_days[start.weekday()] + " " + start.strftime("%d"),
+                "date": start.date().isoformat(),
+            })
+
+    result = []
+    for b in buckets:
+        cursor = db.orders.find({
+            "status": "paid",
+            "paid_at": {"$gte": b["start"], "$lt": b["end"]},
+        }, {"_id": 0, "total": 1})
+        total = 0.0
+        count = 0
+        async for o in cursor:
+            total += o.get("total", 0.0)
+            count += 1
+        result.append({
+            "date": b["date"],
+            "label": b["label"],
+            "total": round(total, 2),
+            "order_count": count,
+        })
+    return result
+
+
 # --------- Seed ---------
 @api_router.post("/seed")
 async def seed(_: bool = Depends(require_auth)):

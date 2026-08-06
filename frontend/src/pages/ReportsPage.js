@@ -8,6 +8,7 @@ import {
 } from "@/components/ui/alert-dialog";
 import { Trash2, ChevronDown, ChevronRight } from "lucide-react";
 import { toast } from "sonner";
+import SalesTrendChart from "@/components/SalesTrendChart";
 
 const PERIODS = [
   { key: "daily", label: "Günlük" },
@@ -205,6 +206,8 @@ export default function ReportsPage() {
         {summaryCard("Aylık Toplam", summary?.monthly_total, summary?.monthly_order_count, true)}
         {summaryCard("Yıllık Toplam", summary?.yearly_total, summary?.yearly_order_count, false)}
       </div>
+
+      <SalesTrendChart />
 
       <Tabs value={period} onValueChange={setPeriod}>
         <div className="flex items-center justify-between flex-wrap gap-3">
