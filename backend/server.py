@@ -651,6 +651,15 @@ async def public_table(table_id: str):
     return {"id": t["id"], "name": t["name"]}
 
 
+@api_router.get("/public/orders/table/{table_id}")
+async def public_get_open_order(table_id: str):
+    t = await db.tables.find_one({"id": table_id}, {"_id": 0})
+    if not t:
+        raise HTTPException(404, "Masa bulunamadı")
+    order = await get_open_order(table_id)
+    return order  # may be None
+
+
 @api_router.post("/public/orders/table/{table_id}/add")
 async def public_add(table_id: str, req: AddItemRequest):
     table = await db.tables.find_one({"id": table_id}, {"_id": 0})
@@ -717,7 +726,8 @@ async def public_add(table_id: str, req: AddItemRequest):
         }},
     )
     await _broadcast_order_change(table_id)
-    return {"ok": True, "total": order["total"]}
+    order = await db.orders.find_one({"id": order["id"]}, {"_id": 0})
+    return order
 
 
 # --------- Reports ---------
