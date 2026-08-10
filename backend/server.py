@@ -660,6 +660,63 @@ async def public_get_open_order(table_id: str):
     return order  # may be None
 
 
+@api_router.post("/public/orders/table/{table_id}/remove/{item_id}")
+async def public_remove_one(table_id: str, item_id: str):
+    order = await get_open_order(table_id)
+    if not order:
+        raise HTTPException(404, "Açık adisyon yok")
+    new_items = []
+    changed = False
+    for it in order["items"]:
+        if it["id"] == item_id:
+            if it["qty"] > 1:
+                it["qty"] -= 1
+                new_items.append(it)
+            changed = True
+        else:
+            new_items.append(it)
+    if not changed:
+        raise HTTPException(404, "Ürün bulunamadı")
+    if not new_items:
+        await db.orders.delete_one({"id": order["id"]})
+        await _broadcast_order_change(table_id)
+        return None
+    order["items"] = new_items
+    await apply_current_totals(order)
+    await db.orders.update_one({"id": order["id"]}, {"$set": {
+        "items": order["items"],
+        "subtotal": order["subtotal"],
+        "total": order["total"],
+        "discount_percent": order["discount_percent"],
+    }})
+    await _broadcast_order_change(table_id)
+    return await db.orders.find_one({"id": order["id"]}, {"_id": 0})
+
+
+@api_router.post("/public/orders/table/{table_id}/delete-item/{item_id}")
+async def public_delete_item(table_id: str, item_id: str):
+    order = await get_open_order(table_id)
+    if not order:
+        raise HTTPException(404, "Açık adisyon yok")
+    new_items = [it for it in order["items"] if it["id"] != item_id]
+    if len(new_items) == len(order["items"]):
+        raise HTTPException(404, "Ürün bulunamadı")
+    if not new_items:
+        await db.orders.delete_one({"id": order["id"]})
+        await _broadcast_order_change(table_id)
+        return None
+    order["items"] = new_items
+    await apply_current_totals(order)
+    await db.orders.update_one({"id": order["id"]}, {"$set": {
+        "items": order["items"],
+        "subtotal": order["subtotal"],
+        "total": order["total"],
+        "discount_percent": order["discount_percent"],
+    }})
+    await _broadcast_order_change(table_id)
+    return await db.orders.find_one({"id": order["id"]}, {"_id": 0})
+
+
 @api_router.post("/public/orders/table/{table_id}/add")
 async def public_add(table_id: str, req: AddItemRequest):
     table = await db.tables.find_one({"id": table_id}, {"_id": 0})
